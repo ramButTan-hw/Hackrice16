@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('helpBridge',{
+  openGoogle:url=>ipcRenderer.invoke('google:open',url),
   snapshot:()=>ipcRenderer.invoke('help:snapshot'),
   status:()=>ipcRenderer.invoke('help:status'),
   panel:state=>ipcRenderer.invoke('help:panel',state),

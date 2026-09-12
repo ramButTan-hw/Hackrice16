@@ -32,7 +32,10 @@ export function pulseCheckin(session, now, report) {
   p.requiredSeconds=timing.holdSeconds??(p.breathingSupport?45:60);
   if(p.delta>=p.threshold){
     p.recoverySince=null;p.since??=now;p.elevatedSeconds=(now-p.since)/1000;p.phase=p.issued?'already_checked':'watching_rise';
-    if(!p.issued&&p.elevatedSeconds>=p.requiredSeconds){p.issued=true;p.phase='check_in';return true;}
+    if(!p.issued&&p.elevatedSeconds>=p.requiredSeconds){
+      if(now<(a.quietUntil??0)||a.checkin){p.phase='cooldown';return false;}
+      p.issued=true;p.phase='check_in';return true;
+    }
   }else if(p.delta<=p.threshold*.5){
     p.since=null;p.elevatedSeconds=0;p.recoverySince??=now;p.phase='recovering';
     if(now-p.recoverySince>=30000){p.issued=false;p.phase='steady';}

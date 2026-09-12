@@ -15,3 +15,11 @@ test('low confidence and idle cannot earn physiological points',()=>{
   const s={startedAt:0,samples:[{timestamp:100,quality:.1}]};evaluateBreak(s,{ready:true,timestamp:100,heartRateChangePercent:90,breathingRateChangePercent:90},100);
   assert.equal(s.assistance.score,0);s.activity={idleSeconds:200};assert.equal(evaluateBreak(s,null,3000000),null);
 });
+test('closing task help leaves future check-ins enabled; closing a check-in respects quiet time',()=>{
+  const s={startedAt:0,samples:[]};
+  answerCheckin(s,{answer:'close',actionId:'chat-close'},40000);
+  assert.equal(s.assistance.quietUntil,0);
+  s.assistance.checkin={id:'checkin-1'};
+  answerCheckin(s,{answer:'close',actionId:'checkin-close'},60000);
+  assert.equal(s.assistance.checkin,null);assert.equal(s.assistance.quietUntil,360000);
+});

@@ -1,3 +1,4 @@
+import GoogleActions,{openGoogle} from './GoogleActions.jsx';
 import {useEffect,useRef,useState} from 'react';
 import {openMicrophone} from './help-audio.js';
 import {utterance} from './utterance.js';
@@ -5,27 +6,55 @@ import {isDismissal} from './dismiss-intent.js';
 import {jsonResponse,streamReply} from './companion-api.js';
 export default function CompanionChat({sessionId,initialText='',listenId=0,onAction=()=>{}}){
   const [messages,setMessages]=useState([]),[draft,setDraft]=useState(''),[phase,setPhase]=useState('idle'),[error,setError]=useState(''),[share,setShare]=useState(false),[remember,setRemember]=useState(true),[memoryStatus,setMemoryStatus]=useState(''),[memories,setMemories]=useState(null);
+  const [proposals,setProposals]=useState([]),[google,setGoogle]=useState({connected:false}),[connecting,setConnecting]=useState(false);
+  const conversation=useRef(crypto.randomUUID());
   const recorder=useRef(null),generation=useRef(0),request=useRef(null),busy=useRef(false),recording=useRef(false),timer=useRef(null),log=useRef(null),callbacks=useRef({}),follow=useRef(false);
   callbacks.current={startRecording,send,onAction};
-  useEffect(()=>{setMessages([]);setDraft('');setError('');setPhase('idle');fetch('/api/companion/config').then(jsonResponse).then(c=>setMemoryStatus(c.memory?'Backboard ready':'Backboard not configured')).catch(()=>{});
+  useEffect(()=>{conversation.current=crypto.randomUUID();setProposals([]);void refreshGoogle();setMessages([]);setDraft('');setError('');setPhase('idle');fetch('/api/companion/config').then(jsonResponse).then(c=>setMemoryStatus(c.memory?'Backboard ready':'Backboard not configured')).catch(()=>{});
     return()=>{generation.current++;request.current?.abort();clearTimeout(timer.current);recorder.current?.close();recorder.current=null;recording.current=false;busy.current=false;};
   },[sessionId]);
   useEffect(()=>{if(!listenId)return;const t=setTimeout(()=>void callbacks.current.startRecording(),200);return()=>clearTimeout(t);},[listenId]);
-  useEffect(()=>{log.current?.scrollTo(0,log.current.scrollHeight);},[messages,initialText,phase]);
-  async function send(text=draft){
+  useEffect(()=>{log.current?.scrollTo(0,log.current.scrollHeight);},[messages,initialText,phase,proposals]);
+  async function send(text=draft,captureOnce=false){
     text=text.trim();if(busy.current)return;if(!text){stopRecording();return;}
+    if(recording.current){const resume=follow.current;stopRecording();follow.current=resume;}
+    const pending=proposals.find(p=>p.status==='preview');
+    if(pending&&/^(yes|confirm|confirm it|yes please|save it|create it|do it|approve)[.! ]*$/i.test(text)){await performGoogle(pending,'confirm');return;}
+    if(pending?.kind.endsWith('_slides')&&/^(generate|add|create)( the)? (images|illustrations)[.! ]*$/i.test(text)){await performGoogle(pending,'illustrate');return;}
+    if(pending&&/^(cancel|cancel it|cancel that|no|no thanks)[.! ]*$/i.test(text)){await performGoogle(pending,'cancel');return;}
     if(isDismissal(text)){stopRecording();onAction('close');return;}
     busy.current=true;setPhase('thinking');setError('');const token=generation.current;
-    const user={role:'user',text:text.slice(0,2000)},history=[...messages.slice(-6).map(m=>({...m,text:m.text.slice(0,2000)})),user];
+    const user={role:'user',text:text.slice(0,2000)},history=[...messages.slice(-6).map(m=>({role:m.role,text:m.text.slice(0,2000)})),user];
     while(history.reduce((s,m)=>s+m.text.length,0)>6000&&history.length>1)history.splice(0,2);
     const base=[...messages,user];setMessages([...base,{role:'model',text:''}]);setDraft('');
     const controller=new AbortController();request.current=controller;const timeout=setTimeout(()=>controller.abort(),55000);
     try{
       let screenshot;
-      if(share){const capture=window.helpPanel?.snapshot??window.helpBridge?.snapshot;if(!capture)throw new Error('Screen capture requires the desktop app. Uncheck Screen to continue.');screenshot=await capture();}
-      let answer='';const result=await streamReply({messages:history,sessionId,screenshot,memory:remember},delta=>{if(token!==generation.current)return;answer+=delta;setMessages([...base,{role:'model',text:answer}]);},controller.signal);
+      const screenRequest=/(screen|page)/i.test(text)&&/(notes|checklist|study guide|slides|presentation)/i.test(text);
+      if(share||captureOnce||screenRequest){const capture=window.helpPanel?.snapshot??window.helpBridge?.snapshot;if(!capture)throw new Error('Screen capture requires the desktop app. Uncheck Screen to continue.');screenshot=await capture();}
+      let answer='';const result=await streamReply({messages:history,sessionId,screenshot,memory:remember,conversationId:conversation.current,activeDeckId:[...proposals].reverse().find(p=>p.result?.id&&p.kind.endsWith('_slides'))?.result.id,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone},delta=>{if(token!==generation.current)return;answer+=delta;setMessages([...base,{role:'model',text:answer}]);},controller.signal);
       if(token!==generation.current)return;
-      setMessages([...base,{role:'model',text:result.text}]);setMemoryStatus('Memory '+result.memoryStatus+' · '+result.recalled+' recalled');
+      let generated;
+      if(result.imageRequest){
+        clearTimeout(timeout);setPhase('imaging');
+        const imageTimeout=setTimeout(()=>controller.abort(),70000);
+        try{generated=await fetch('/api/images/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.imageRequest),signal:controller.signal}).then(jsonResponse);}finally{clearTimeout(imageTimeout);}
+        if(token!==generation.current)return;
+      }
+      setMessages([...base,{role:'model',text:generated?'Here’s your generated image.':result.text,...(generated?{image:generated.image,imagePrompt:result.imageRequest.prompt}:{})}]);setMemoryStatus('Memory '+result.memoryStatus+' · '+result.recalled+' recalled');
+      if(result.proposals?.length){
+        clearTimeout(timeout);
+        setProposals(result.proposals);
+        for(let i=0;i<result.proposals.length;i++){
+          const proposal=result.proposals[i];
+          if(proposal.generateImages&&proposal.slides?.some((s,n)=>s.imagePrompt&&!proposal.images?.[n])){
+            setPhase('imaging');
+            try{result.proposals[i]=await fetch('/api/google/actions/'+proposal.id+'/illustrate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current}),signal:controller.signal}).then(jsonResponse);}
+            catch(e){if(token===generation.current)setError('The slide preview is ready, but illustrations failed: '+e.message);}
+          }
+        }
+        if(token!==generation.current)return;
+        for(const old of proposals.filter(p=>p.status==='preview'))void fetch('/api/google/actions/'+old.id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current})}).catch(()=>{});setProposals(result.proposals);}
       if(result.action==='close'){follow.current=false;onAction('close');}
     }catch(e){if(token===generation.current){follow.current=false;setMessages(messages);setDraft(user.text);setError(e.name==='AbortError'?'Reply timed out. Your message is ready to retry.':e.message);}}
     finally{clearTimeout(timeout);if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current){timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);}else onAction('idle');}}
@@ -60,18 +89,42 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,onAct
   const query=sessionId?'?sessionId='+encodeURIComponent(sessionId):'';
   async function loadMemory(){try{setMemories((await fetch('/api/memories'+query).then(jsonResponse)).memories);}catch(e){setError(e.message);}}
   async function forget(id){try{await fetch('/api/memories/'+encodeURIComponent(id)+query,{method:'DELETE'}).then(jsonResponse);await loadMemory();}catch(e){setError(e.message);}}
-  const status=phase==='recording'?'Listening':phase==='transcribing'?'Understanding…':phase==='thinking'?'Working on it…':phase==='microphone'?'Getting ready…':'Ready when you are';
+  async function refreshGoogle(){try{setGoogle(await fetch('/api/google/status').then(jsonResponse));}catch{}}
+  useEffect(()=>{const refresh=()=>void refreshGoogle();window.addEventListener('focus',refresh);return()=>window.removeEventListener('focus',refresh);},[]);
+  useEffect(()=>{if(!connecting)return;const timer=setInterval(()=>void refreshGoogle(),2000);const timeout=setTimeout(()=>setConnecting(false),120000);return()=>{clearInterval(timer);clearTimeout(timeout);};},[connecting]);
+  useEffect(()=>{if(google.connected)setConnecting(false);},[google.connected]);
+  async function connectGoogle(){stopRecording();try{const data=await fetch('/api/google/connect',{method:'POST'}).then(jsonResponse);await openGoogle(data.url);setConnecting(true);}catch(e){setError(e.message);}}
+  async function disconnectGoogle(){stopRecording();try{await fetch('/api/google/disconnect',{method:'POST'}).then(jsonResponse);await refreshGoogle();}catch(e){setError(e.message);}}
+  async function attachImage(message,selection){
+    const [id,index]=selection.split(':');if(!id||busy.current)return;
+    stopRecording();busy.current=true;setPhase('thinking');setError('');const token=generation.current;
+    try{const updated=await fetch('/api/google/actions/'+id+'/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current,index:Number(index),image:message.image,prompt:(message.imagePrompt||'Generated illustration').slice(0,1000)})}).then(jsonResponse);if(token===generation.current)setProposals(list=>list.map(p=>p.id===id?updated:p));}
+    catch(e){if(token===generation.current)setError(e.message);}
+    finally{if(token===generation.current){busy.current=false;setPhase('idle');}}
+  }
+  async function performGoogle(proposal,operation){
+    if(busy.current)return;const resume=follow.current;stopRecording();busy.current=true;setPhase('thinking');setError('');const token=generation.current;
+    try{const result=await fetch('/api/google/actions/'+proposal.id+'/'+operation,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current,sessionId,memory:remember})}).then(jsonResponse);
+      if(token!==generation.current)return;setProposals(list=>list.map(p=>p.id===proposal.id?result:p));
+      const text=operation==='illustrate'?'Illustrations are ready. Review the slide previews, then confirm to save.':result.status==='done'?'Saved in Google: '+result.title:result.status==='cancelled'?'Cancelled. Nothing was saved.':result.error||'Check Google for the result.';
+      setMessages(list=>[...list,{role:'user',text:operation==='illustrate'?'Generate illustrations.':operation==='confirm'?'Confirm this preview.':'Cancel this preview.'},{role:'model',text}]);
+      follow.current=resume&&result.status!=='uncertain';
+    }catch(e){if(token===generation.current){setError(e.message);follow.current=false;}}
+    finally{if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current)timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);else onAction('idle');}}
+  }
+  const status=phase==='recording'?'Listening':phase==='transcribing'?'Understanding…':phase==='imaging'?'Generating image…':phase==='thinking'?'Working on it…':phase==='microphone'?'Getting ready…':'Ready when you are';
   return <>
     <div ref={log} className="voice-transcript" role="log" aria-live="polite">
       {initialText&&<div className="ai-message model"><span className="ai-message-label">CHECK-IN</span><p>{initialText}</p></div>}
-      {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">JARVIS</span>}<p>{m.text||'Thinking…'}</p></div>)}
-      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>A little help, right here.</h2><p>Ask a question, untangle a problem,<br/>or find your next step.</p></div>}
+      {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">JARVIS</span>}<p>{m.text||'Thinking…'}</p>{m.image&&<figure className="generated-image"><img src={m.image} alt={m.imagePrompt||'AI-generated image'}/><figcaption>AI-generated · <a href={m.image} download={'jarvis-image-'+i+(m.image.startsWith('data:image/jpeg')?'.jpg':'.png')}>Download image</a></figcaption>{proposals.some(p=>p.status==='preview'&&p.slides)&&<select aria-label="Add generated image to slide" value="" disabled={busy.current} onChange={e=>void attachImage(m,e.target.value)}><option value="">Add to a slide…</option>{proposals.filter(p=>p.status==='preview'&&p.slides).flatMap(p=>p.slides.map((slide,n)=><option key={p.id+':'+n} value={p.id+':'+n}>{p.title} · Slide {n+1}: {slide.title}</option>))}</select>}</figure>}</div>)}
+      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>A little help, right here.</h2><p>Ask a question, untangle a problem,<br/>or find your next step.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Screen → study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Screen → checklist</button></div></div>}
+      <GoogleActions proposals={proposals} busy={busy.current} connected={google.connected} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
     </div>
     {error&&<p className="voice-error" role="alert">{error}</p>}
     <div className="ai-status" role="status"><div className={'assistant-orb '+(phase==='recording'?'listening':'')} aria-hidden="true"><i/><i/><i/><i/><i/></div><span>{status}</span><small>{phase==='recording'?'Pause to send':phase==='idle'?'Say “hey Jarvis”':''}</small></div>
     <form className="companion-compose" onSubmit={e=>{e.preventDefault();void send();}}>
       <div className="ai-input"><textarea onFocus={()=>{if(recording.current)stopRecording();}} aria-label="Message Jarvis" rows={1} maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Or type a question…" disabled={phase!=='idle'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><button className="ai-send" aria-label="Send message" title="Send · Enter" disabled={phase!=='idle'||!draft.trim()}>↑</button></div>
-      <div className="ai-bottom"><button className="ai-listen" type="button" disabled={busy.current} onClick={()=>recording.current?stopRecording():void startRecording()}>{phase==='recording'?'Ⅱ Pause':'◉ Listen'}</button><label className={'ai-screen '+(share?'enabled':'')} title="Send a screenshot with your next question"><input type="checkbox" checked={share} disabled={phase!=='idle'} onChange={e=>setShare(e.target.checked)}/><span>Screen {share?'on':'off'}</span></label><details className="ai-settings"><summary aria-label="Companion settings" title="Settings and memory">•••</summary><div className="ai-settings-panel"><label><input type="checkbox" checked={remember} disabled={phase!=='idle'} onChange={e=>setRemember(e.target.checked)}/> Remember work context</label><p>{memoryStatus||'Preferences and progress across sessions.'}</p><button type="button" onClick={()=>void loadMemory()}>View saved memories</button>{initialText&&<div className="ai-feedback"><span>How’s it going?</span><button type="button" onClick={()=>onAction('fine')}>Doing fine</button><button type="button" onClick={()=>onAction('tired')}>Feeling tired</button></div>}{messages.length>1&&<button type="button" onClick={()=>onAction('helpful')}>This helped</button>}</div></details></div>
+      <div className="ai-bottom"><button className="ai-listen" type="button" disabled={busy.current} onClick={()=>recording.current?stopRecording():void startRecording()}>{phase==='recording'?'Ⅱ Pause':'◉ Listen'}</button><label className={'ai-screen '+(share?'enabled':'')} title="Send a screenshot with your next question"><input type="checkbox" checked={share} disabled={phase!=='idle'} onChange={e=>setShare(e.target.checked)}/><span>Screen {share?'on':'off'}</span></label><details className="ai-settings"><summary aria-label="Companion settings" title="Settings and memory">•••</summary><div className="ai-settings-panel"><div className="google-connection"><strong>Google Workspace</strong><p>{google.connected?google.email:connecting?'Finish sign-in in your browser':'Create Docs, Slides and work blocks'}</p><button type="button" disabled={busy.current} onClick={()=>void (google.connected?disconnectGoogle():connectGoogle())}>{google.connected?'Disconnect Google':connecting?'Connect again':'Connect Google'}</button></div><label><input type="checkbox" checked={remember} disabled={phase!=='idle'} onChange={e=>setRemember(e.target.checked)}/> Remember work context</label><p>{memoryStatus||'Preferences and progress across sessions.'}</p><button type="button" onClick={()=>void loadMemory()}>View saved memories</button>{initialText&&<div className="ai-feedback"><span>How’s it going?</span><button type="button" onClick={()=>onAction('fine')}>Doing fine</button><button type="button" onClick={()=>onAction('tired')}>Feeling tired</button></div>}{messages.length>1&&<button type="button" onClick={()=>onAction('helpful')}>This helped</button>}</div></details></div>
     </form>
     {memories&&<div className="memory-list"><header><strong>Saved memories</strong><button aria-label="Close memories" onClick={()=>setMemories(null)}>×</button></header>{!memories.length&&<p>No saved memories yet.</p>}{memories.map(m=><div key={m.id??m.memory_id}><p>{m.content}</p><button onClick={()=>void forget(m.id??m.memory_id)}>Forget</button></div>)}</div>}
   </>;

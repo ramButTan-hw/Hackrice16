@@ -29,3 +29,9 @@ test('missing data cannot be treated as a sustained hold',()=>{
   const f=fixture();f.run(40,90);const now=f.s.samples.at(-1).timestamp+20000;
   assert.equal(evaluateBreak(f.s,null,now),null);assert.equal(f.s.assistance.pulse.since,null);
 });
+test('cooldown defers a sustained rise instead of consuming its only check-in',()=>{
+  const f=fixture();f.s.assistance.quietUntil=180000;
+  assert.equal(f.run(100,90),0);assert.equal(f.s.assistance.pulse.issued,false);
+  assert.equal(f.s.assistance.pulse.phase,'cooldown');
+  assert.equal(f.run(40,90),1);assert.equal(f.s.assistance.pulse.issued,true);
+});
