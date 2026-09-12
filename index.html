@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <body>
+    <div
+      id="chat-log"
+      style="white-space: pre-wrap; font-family: monospace"
+    ></div>
+
+    <input type="text" id="user-input" placeholder="Type a message..." />
+    <button id="send-btn">Send</button>
+
+    <script>
+      const history = []; // Tracks multi-turn conversation
+
+      const logDiv = document.getElementById("chat-log");
+      const input = document.getElementById("user-input");
+      const btn = document.getElementById("send-btn");
+
+      async function sendMessage() {
+        const text = input.value.trim();
+        if (!text) return;
+
+        logDiv.textContent += `\nYou: ${text}\n`;
+        input.value = "";
+        history.push({ role: "user", parts: [{ text }] });
+
+        try {
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: history }),
+          });
+
+          const data = await response.json();
+
+          // Check if the API returned an error object
+          if (data.error) {
+            logDiv.textContent += `API Error: ${data.error.message || JSON.stringify(data.error)}\n`;
+            return;
+          }
+
+          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!reply) {
+            logDiv.textContent += `Error: Unexpected response format\n`;
+            console.log("Full response:", data);
+            return;
+          }
+
+          logDiv.textContent += `Gemini: ${reply}\n`;
+          history.push({ role: "model", parts: [{ text: reply }] });
+        } catch (err) {
+          logDiv.textContent += `Error: ${err.message}\n`;
+        }
+      }
+
+      btn.addEventListener("click", sendMessage);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendMessage();
+      });
+    </script>
+  </body>
+</html>
