@@ -5,13 +5,11 @@
       id="chat-log"
       style="white-space: pre-wrap; font-family: monospace"
     ></div>
-
     <input type="text" id="user-input" placeholder="Type a message..." />
     <button id="send-btn">Send</button>
 
     <script>
-      const history = []; // Tracks multi-turn conversation
-
+      const history = [];
       const logDiv = document.getElementById("chat-log");
       const input = document.getElementById("user-input");
       const btn = document.getElementById("send-btn");
@@ -33,21 +31,22 @@
 
           const data = await response.json();
 
-          // Check if the API returned an error object
           if (data.error) {
-            logDiv.textContent += `API Error: ${data.error.message || JSON.stringify(data.error)}\n`;
+            logDiv.textContent += `Error: ${data.error}\n`;
             return;
           }
 
-          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!reply) {
-            logDiv.textContent += `Error: Unexpected response format\n`;
-            console.log("Full response:", data);
-            return;
-          }
+          // Support either server structure
+          const reply =
+            data.reply || data.candidates?.[0]?.content?.parts?.[0]?.text;
 
           logDiv.textContent += `Gemini: ${reply}\n`;
           history.push({ role: "model", parts: [{ text: reply }] });
+
+          if (data.audio) {
+            const audio = new Audio(data.audio);
+            audio.play();
+          }
         } catch (err) {
           logDiv.textContent += `Error: ${err.message}\n`;
         }
