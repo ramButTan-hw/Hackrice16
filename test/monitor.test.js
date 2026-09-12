@@ -47,13 +47,16 @@ test('automatic analyses combine inputs, run periodically, cap requests, and lim
   assert.equal(f.calls.length, 6); assert.equal(status.calls, 6); assert.equal(status.status, 'budget_reached');
 });
 
-test('signal loss, low confidence, and missing MATLAB readiness suppress automatic calls', async t => {
+test('poor physiology is excluded, limited-data reviews run, and stale input still blocks calls', async t => {
   const f = await fixture(t);
-  await f.observe(60, .1); await f.monitor.tick(); assert.equal(f.calls.length, 0);
-  f.setTime(80); await f.monitor.tick(); assert.equal(f.calls.length, 0);
+  await f.observe(60, .1); await f.monitor.tick(); assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].presage.heartRate, null); assert.equal(f.calls[0].presage.breathingRate, null);
+  f.setTime(80); await f.monitor.tick(); assert.equal(f.calls.length, 1);
   assert.equal((await f.monitor.status(f.id)).status, 'waiting_signal');
   const g = await fixture(t, { matlab: { analyze: async (_s, now) => ({ provider: 'matlab', timestamp: now, ready: false }), close: async () => {} } });
-  await g.observe(60); await g.monitor.tick(); assert.equal(g.calls.length, 0);
+  await g.observe(60); await g.monitor.tick(); assert.equal(g.calls.length, 1);
+  assert.equal(g.calls[0].physiologyReliable, false);
+  assert.match(g.calls[0].limitations, /No reliable physiological baseline/);
 });
 
 test('a sustained activity change can advance analysis but never bypass the minimum interval', async t => {
@@ -93,6 +96,9 @@ test('no-intervention decisions are recorded without creating a suggestion or sp
   const s = await f.sessions.get(f.id);
   assert.equal(s.monitor.decisions.length, 1); assert.equal(s.monitor.decisions[0].delivered, false);
   assert.equal(s.interventions.length, 0); assert.equal(f.speechCalls.length, 0);
+  assert.ok(s.events.some(e => e.source === 'matlab' && e.event === 'result'));
+  assert.ok(s.events.some(e => e.source === 'gemini' && e.event === 'request'));
+  assert.ok(s.events.some(e => e.source === 'gemini' && e.event === 'response'));
 });
 
 test('concurrent session writes retain both activity and analysis state', async t => {

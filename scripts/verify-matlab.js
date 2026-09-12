@@ -19,7 +19,11 @@ try {
   assert.equal(poor.ready, false); assert.equal(poor.heartRateMean, null);
   const empty = await worker.analyze({ samples: [] }, timestamp);
   assert.equal(empty.ready, false); assert.equal(empty.validSampleCount, 0);
+  const heartOnly = await worker.analyze({ samples: samples.map(s => ({ ...s, breathingRate: null, quality: 0, qualityByMetric: { heartRate: .9, breathingRate: 0, hrv: 0 } })) }, timestamp);
+  assert.equal(heartOnly.ready, true); assert.equal(heartOnly.heartRateReady, true);
+  assert.equal(heartOnly.breathingReady, false); assert.equal(heartOnly.breathingRateMean, null);
+  assert.equal(heartOnly.baselineHeartRate, 70);
   await mkdir('artifacts', { recursive: true });
   await writeFile('artifacts/matlab-window-verification.json', JSON.stringify({ source: 'synthetic verification', report, poor, empty }, null, 2));
-  console.log('PASS: real MATLAB rolling trends, fixed baseline, poor-quality and empty windows; same worker reused.');
+  console.log('PASS: real MATLAB rolling trends, fixed baseline, heart-only data, poor-quality and empty windows; same worker reused.');
 } finally { await worker.close(); }

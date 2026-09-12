@@ -6,11 +6,13 @@ async function post(id, endpoint, body) {
   if (!response.ok) throw new Error(data.error || 'Monitoring connection failed.');
   return data;
 }
-const labels = { calibrating: 'Establishing a reliable baseline…', waiting_signal: 'Waiting for fresh readings…', analyzing_matlab: 'MATLAB is analyzing the latest window…', analyzing_gemini: 'Gemini is reviewing the combined signals…', watching: 'Watching for a useful moment to help', budget_reached: 'Analysis budget reached. Monitoring continues.', paused: 'Analysis paused', error: 'Analysis needs attention' };
+const labels = { limited_data: 'Reviewing available data; physiology is not reliable yet.', calibrating: 'Establishing a reliable baseline…', waiting_signal: 'Waiting for fresh readings…', analyzing_matlab: 'MATLAB is analyzing the latest window…', analyzing_gemini: 'Gemini is reviewing the combined signals…', watching: 'Watching for a useful moment to help', budget_reached: 'Analysis budget reached. Monitoring continues.', paused: 'Analysis paused', error: 'Analysis needs attention' };
 export default function Presage({ sessionId, enabled, onSample, onRunning }) {
   const [running, setRunning] = useState(false), [starting, setStarting] = useState(false);
   const [voice, setVoice] = useState(false), [monitor, setMonitor] = useState(null);
   const [hint, setHint] = useState('Camera off. Monitoring starts with your session.');
+  const [cameraInfo, setCameraInfo] = useState(null);
+  const [logError, setLogError] = useState('');
   const video = useRef(null), stream = useRef(null), loop = useRef(null);
   const audio = useRef(null);
   const generation = useRef(0), pending = useRef(false), capturing = useRef(false);
@@ -33,7 +35,7 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     const version = ++generation.current;
     setStarting(true); setHint('Opening camera…');
     try {
-      const capture = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 30, max: 30 } } });
+      const capture = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' } });
       if (version !== generation.current) { capture.getTracks().forEach(track => track.stop()); return; }
       stream.current = capture; video.current.srcObject = capture;
       await video.current.play();
@@ -46,6 +48,8 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
       setHint('Keep your face and chest in view. Monitoring continues across tabs.');
       const canvas = document.createElement('canvas');
       canvas.width = video.current.videoWidth; canvas.height = video.current.videoHeight;
+      setCameraInfo({ width: canvas.width, height: canvas.height, fps: null });
+      let accepted = 0, measuredAt = performance.now();
       const context = canvas.getContext('2d', { willReadFrequently: true });
       async function frame() {
         if (version !== generation.current) return;
@@ -53,7 +57,13 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
         try {
           if (video.current?.readyState >= 2) {
             context.drawImage(video.current, 0, 0, canvas.width, canvas.height);
-            await bridge.frame({ data: context.getImageData(0, 0, canvas.width, canvas.height).data.buffer, width: canvas.width, height: canvas.height });
+            const sent = await bridge.frame({ data: context.getImageData(0, 0, canvas.width, canvas.height).data.buffer, width: canvas.width, height: canvas.height });
+            if (sent) accepted++;
+            const elapsed = performance.now() - measuredAt;
+            if (elapsed >= 2000 && version === generation.current) {
+              setCameraInfo({ width: canvas.width, height: canvas.height, fps: Math.round(accepted * 1000 / elapsed) });
+              accepted = 0; measuredAt = performance.now();
+            }
           }
           if (version === generation.current) loop.current = setTimeout(frame, Math.max(0, 1000 / 30 - (performance.now() - began)));
         } catch { setHint('Camera processing stopped. Resume monitoring to retry.'); void stop(); }
@@ -66,8 +76,19 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
   useEffect(() => {
     if (!bridge || !enabled) return;
     let alive = true, polling = false;
+    let logQueue = Promise.resolve(), queued = 0;
     const unsubscribe = bridge.subscribe(event => {
-      if (event.type === 'validation') setHint(event.hint || 'Hold still with your face and chest in view.');
+      if (['metrics', 'validation', 'error', 'processing', 'stopped'].includes(event.type) && queued < 10) {
+        queued++;
+        logQueue = logQueue.then(() => post(sessionId, 'events', { event: event.type, data: event.type === 'metrics' ? event.data : event }))
+          .catch(error => { if (alive) setLogError('Log could not be saved: ' + error.message); })
+          .finally(() => { queued--; });
+      }
+      if (event.type === 'validation') {
+        if (event.code === 0) setHint('Position check passed. Breathe naturally while readings settle.');
+        else if (event.code === 7) setHint('Presage has not detected your chest. Include your face, both shoulders and upper torso; check that your shirt is well lit.');
+        else setHint(event.hint || 'Presage is checking the camera view.');
+      }
       if (event.type === 'error') { setHint(event.message); void stop(); }
       if (event.type === 'stopped') {
         generation.current++; release(); setRunning(false); setStarting(false);
@@ -108,6 +129,7 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
   return <section className="camera-checkin" aria-label="Continuous monitoring">
     <div className="camera-heading"><span className="eyebrow">LIVE MONITORING</span><span>{running ? 'Camera on' : 'Camera off'}</span></div>
     <video ref={video} muted playsInline hidden={!running && !starting} aria-label="Camera preview"/>
+    {running && cameraInfo && <small className="camera-diagnostics">Full frame · {cameraInfo.width} × {cameraInfo.height}{cameraInfo.fps !== null ? ` · ${cameraInfo.fps} fps sent` : ''}</small>}
     <p role="status">{!bridge ? 'Camera monitoring is available in the desktop app.' : !enabled ? 'Start a session to begin continuous monitoring.' : hint}</p>
     <div className="camera-actions">{running || starting
       ? <button type="button" onClick={() => { setHint('Camera and automatic analysis paused.'); void stop(); }}>Pause monitoring</button>
@@ -115,6 +137,9 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
       <label><input type="checkbox" checked={voice} onChange={event => void toggleVoice(event.target.checked)}/> Speak suggestions</label></div>
     {enabled && <div className="monitor-status">
       <p>{monitor?.error || labels[monitor?.status] || 'Preparing automatic analysis…'}</p>
+      {monitor?.waitReason && <p>{monitor.waitReason}</p>}
+      {logError && <p role="alert">{logError}</p>}
+      <p>Open the Log tab for returned Presage values and analysis details.</p>
       <span>Gemini analyses: {monitor?.calls ?? 0} / {monitor?.budget ?? 6}</span>
       {monitor?.matlab && <span> · MATLAB: {monitor.matlab.validSampleCount} reliable samples / last 60s</span>}
       {decision && <p>{decision.delivered ? 'Suggestion delivered' : 'No interruption'} · {decision.reason}</p>}

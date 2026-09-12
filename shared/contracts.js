@@ -17,6 +17,14 @@ export function metric(input, source, startedAt, now, lastTimestamp = 0) {
   }
   if (!Number.isFinite(input.quality) || input.quality < 0 || input.quality > 1) fail('quality must be between 0 and 1.');
   result.quality = input.quality;
+  if (input.qualityByMetric !== undefined) {
+    result.qualityByMetric = {};
+    for (const key of ['heartRate', 'breathingRate', 'hrv']) {
+      const value = input.qualityByMetric?.[key];
+      if (!Number.isFinite(value) || value < 0 || value > 1) fail('Invalid per-metric confidence.');
+      result.qualityByMetric[key] = value;
+    }
+  }
   result.idleSeconds = input.idleSeconds ?? 0;
   result.onBreak = input.onBreak ?? false;
   if (!Number.isFinite(result.idleSeconds) || result.idleSeconds < 0 || typeof result.onBreak !== 'boolean') fail('Invalid behavioral context.');

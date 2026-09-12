@@ -4,6 +4,7 @@ import { configuredRepository } from './config.js';
 import { sessionService } from './session-service.js';
 import { generateReply } from './chat.js';
 import { monitoringService } from './monitor.js';
+import { appendEvent } from './event-log.js';
 
 export function createApp({ repository = configuredRepository(), now = Date.now, monitorOptions = {} } = {}) {
   const app = express();
@@ -36,6 +37,17 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
   app.post('/api/sessions/:id/activity', async (req, res) => res.json(await monitor.activity(req.params.id, req.body)));
   app.post('/api/sessions/:id/monitor', async (req, res) => res.json(await monitor.configure(req.params.id, req.body)));
   app.get('/api/sessions/:id/monitor', async (req, res) => res.json(await monitor.status(req.params.id)));
+  app.post('/api/sessions/:id/events', async (req, res) => {
+    const { event, data } = req.body || {};
+    if (!['metrics', 'validation', 'error', 'processing', 'stopped'].includes(event) || JSON.stringify(data ?? null).length > 24000) return res.status(400).json({ error: 'Invalid Presage log event.' });
+    await sessions.update(req.params.id, s => appendEvent(s, now(), 'presage', event, data));
+    res.json({ ok: true });
+  });
+  app.get('/api/sessions/:id/events', async (req, res) => {
+    const s = await sessions.get(req.params.id);
+    if (req.query.download === '1') res.attachment('session-events.json');
+    res.json({ sessionId: s.id, retainedLimit: 180, totalEvents: s.eventSequence ?? 0, events: s.events ?? [] });
+  });
   app.post('/api/sessions/:id/interventions', async (req, res) => res.status(201).json(await sessions.intervene(req.params.id, req.body)));
   app.post('/api/sessions/:id/end', async (req, res) => { await monitor.stop(req.params.id); res.json(await sessions.end(req.params.id)); });
   app.get('/api/sessions/:id/summary', async (req, res) => res.json(await sessions.summary(req.params.id)));

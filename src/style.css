@@ -155,8 +155,18 @@ button:focus-visible, input:focus-visible, summary:focus-visible { outline-color
 .camera-checkin { margin-top: 14px; padding: 12px; border: 1px solid rgb(var(--accent-rgb) / .18); border-radius: 14px; background: rgb(var(--accent-rgb) / .04); }
 .camera-heading, .camera-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 10px; color: var(--subtle); }
 .camera-checkin p { font-size: 11px; line-height: 1.5; margin: 8px 0; }
-.camera-checkin video { width: 100%; max-height: 150px; object-fit: cover; border-radius: 9px; margin-top: 10px; transform: scaleX(-1); }
+.camera-checkin video { display: block; width: 100%; height: 180px; object-fit: contain; background: rgb(var(--panel-rgb)); border-radius: 9px; margin-top: 10px; transform: scaleX(-1); }
 .camera-checkin video[hidden] { display: none; }
+.camera-diagnostics { display: block; margin-top: 5px; color: var(--subtle); font-size: 10px; }
+.event-log[hidden] { display: none; }
+.event-log p { font-size: 11px; line-height: 1.5; margin: 10px 0; }
+.event-log small { color: var(--subtle); font-size: 10px; }
+.event-log a { color: var(--text); font-size: 11px; }
+.event-list { margin-top: 10px; max-height: 290px; overflow: auto; }
+.event-list details { padding: 9px 0; border-bottom: 1px solid rgb(var(--accent-rgb) / .15); font-size: 11px; }
+.event-list summary { cursor: pointer; }
+.event-list time { color: var(--subtle); }
+.event-list pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; max-height: 240px; overflow: auto; background: rgb(var(--accent-rgb) / .06); padding: 10px; border-radius: 8px; margin-top: 8px; }
 .camera-actions button { flex-shrink: 0; border: 1px solid rgb(var(--accent-rgb) / .25); border-radius: 8px; background: rgb(var(--accent-rgb) / .12); padding: 8px 10px; color: var(--text); font-size: 11px; }
 .camera-actions span { text-align: right; font-size: 9px; }
 .monitor-status { margin-top: 10px; border-top: 1px solid rgb(var(--accent-rgb) / .15); padding-top: 6px; font-size: 10px; color: var(--subtle); }

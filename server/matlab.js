@@ -39,7 +39,8 @@ export function matlabWorker({ executable = process.env.MATLAB_EXECUTABLE || 'C:
       const id = randomUUID();
       const input = join(folder, id + '.request.json');
       const output = join(folder, id + '.response.json');
-      await writeFile(input + '.tmp', JSON.stringify({ session: { samples: session.samples }, now }));
+      const samples = session.samples.map(s => ({ timestamp: s.timestamp, heartRate: s.heartRate, breathingRate: s.breathingRate, hrv: s.hrv, quality: s.quality, onBreak: s.onBreak, qualityByMetric: s.qualityByMetric ?? { heartRate: s.quality, breathingRate: s.quality, hrv: s.quality } }));
+      await writeFile(input + '.tmp', JSON.stringify({ session: { samples }, now }));
       await rename(input + '.tmp', input);
       await waitFile(output, 15000);
       const report = JSON.parse(await readFile(output, 'utf8'));

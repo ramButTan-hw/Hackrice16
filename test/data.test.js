@@ -77,6 +77,11 @@ test('HTTP session lifecycle and browser origin boundary', async t => {
   const response = await fetch(base + '/sessions', options);
   assert.equal(response.status, 201);
   const s = await response.json();
+  const eventResponse = await fetch(base + '/sessions/' + s.id + '/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'metrics', data: { cardio: { pulseRate: { latest: [{ value: 72, confidence: 80, stable: true }] } } } }) });
+  assert.equal(eventResponse.status, 200);
+  const download = await fetch(base + '/sessions/' + s.id + '/events?download=1');
+  assert.match(download.headers.get('content-disposition'), /attachment/);
+  assert.equal((await download.json()).events[0].source, 'presage');
   assert.equal((await fetch(base + '/sessions/' + s.id + '/summary')).status, 200);
   assert.equal((await fetch(base + '/sessions/' + s.id + '/end', { method: 'POST' })).status, 200);
   assert.equal((await fetch(base + '/sessions/' + s.id + '/end', { method: 'POST' })).status, 409);

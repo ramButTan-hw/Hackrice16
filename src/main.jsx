@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 import Chat from './Chat.jsx';
 import Presage from './Presage.jsx';
+import EventLog from './EventLog.jsx';
 import { ThemePicker, useTheme } from './themes.jsx';
 
 const desktop = window.companionWindow;
@@ -171,6 +172,7 @@ function App() {
               <button className={tab === 'session' ? 'current' : ''} aria-pressed={tab === 'session'} onClick={() => setTab('session')}>Session</button>
               <button className={tab === 'history' ? 'current' : ''} aria-pressed={tab === 'history'} onClick={() => setTab('history')}>History</button>
               <button className={tab === 'chat' ? 'current' : ''} aria-pressed={tab === 'chat'} onClick={() => setTab('chat')}>Chat</button>
+              <button className={tab === 'log' ? 'current' : ''} aria-pressed={tab === 'log'} onClick={() => setTab('log')}>Log</button>
             </nav>
             <div className="content">
               {tab !== 'session' && monitoring && <p className="monitor-indicator">Camera on · Automatic analysis running</p>}
@@ -182,11 +184,12 @@ function App() {
                     {active ? <button className="session-action ending" type="button" disabled={busy} onClick={end} aria-label="End session"><Icon name="stop"/></button> : <button className="session-action" disabled={busy || !goal.trim()} aria-label="Start session"><Icon name="play"/></button>}</div>
                 </form>
                 <Presage sessionId={session?.id} enabled={active} onRunning={setMonitoring} onSample={({ sample, workState }) => { setState(workState); setSession(previous => previous ? { ...previous, samples: [...previous.samples.filter(item => item.timestamp !== sample.timestamp), sample] } : previous); }}/>
-                <section className="signals" aria-label="Session readings"><div><span><Icon name="heart"/> Heart rate</span><strong>{last?.quality >= 0.7 ? last.heartRate ?? '—' : '—'}<small>bpm</small></strong></div><div><span><Icon name="wind"/> Breathing</span><strong>{last?.quality >= 0.7 ? last.breathingRate ?? '—' : '—'}<small>/ min</small></strong></div><div className="signal-note"><span>{fresh ? 'Live reading' : last ? `Last reading · ${new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${last.quality < 0.7 ? ' · Low signal quality' : ''}` : 'No readings yet'}</span></div></section>
+                <section className="signals" aria-label="Session readings"><div><span><Icon name="heart"/> Heart rate</span><strong>{(last?.qualityByMetric?.heartRate ?? last?.quality) >= 0.7 ? last.heartRate ?? '—' : '—'}<small>bpm</small></strong></div><div><span><Icon name="wind"/> Breathing</span><strong>{(last?.qualityByMetric?.breathingRate ?? last?.quality) >= 0.7 ? last.breathingRate ?? '—' : '—'}<small>/ min</small></strong></div><div className="signal-note"><span>{fresh ? 'Live reading' : last ? `Last reading · ${new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${last.quality < 0.7 ? ' · Low signal quality' : ''}` : 'No readings yet'}</span></div></section>
                 {message && <section className="companion-note"><div><span className="eyebrow">CHECK-IN</span><p>{message.text}</p>{message.provider === 'demo' && <small>Demo check-in</small>}</div></section>}
                 <details className="details"><summary>Session details <Icon name="chevron"/></summary><div className="detail-body"><p>{state?.reason ?? 'Readings will appear when the camera integration connects. Your timer works independently.'}</p><dl><div><dt>Samples received</dt><dd>{session?.samples?.length ?? 0}</dd></div><div><dt>Companion check-ins</dt><dd>{session?.interventions?.length ?? 0}</dd></div>{summary && <div><dt>Average heart rate</dt><dd>{summary.averageHeartRate == null ? '—' : summary.averageHeartRate.toFixed(1) + ' bpm'}</dd></div>}</dl></div></details>
               </div>{tab === 'history' ? <section className="history"><div className="history-list">{history.length ? history.map(item => <button className="history-item" key={item.id} disabled={busy || (active && session.id !== item.id)} onClick={() => openHistory(item)}><div className="history-item-text"><strong>{item.goal}</strong><small>{new Date(item.startedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {item.status === 'active' ? 'In progress' : elapsed(item, now)}{item.source === 'demo' ? ' · Demo' : ''}</small></div><Icon name="arrow"/></button>) : <div className="empty-history"><p>No sessions yet.</p><button onClick={() => setTab('session')}>Start a session <Icon name="arrow"/></button></div>}</div></section> : null}
               <Chat visible={tab === 'chat'} sessionId={session?.id}/>
+              <EventLog visible={tab === 'log'} sessionId={session?.id}/>
               {tab !== 'session' && message && <section className="companion-note"><div><span className="eyebrow">COMPANION</span><p>{message.text}</p></div></section>}
               {error && <div className="error" role="alert"><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><Icon name="close"/></button></div>}
             </div>

@@ -37,9 +37,11 @@ Electron reads system inactivity every second, including during camera signal ga
 
 One persistent MATLAB worker analyzes a rolling 60-second window every ten
 seconds. It computes averages, variability, slopes and changes relative to the
-first continuous 30 seconds of reliable baseline data. Automatic analysis waits
-at least the first session minute AND for sufficient reliable data. Elapsed time
-alone does not establish readiness. Missing or stale data pauses Gemini analysis;
+first continuous 30 seconds of reliable baseline data for each metric separately.
+Reliable heart rate can be used while breathing is unavailable. After the first
+session minute, Gemini can review task and inactivity with an explicit limitation
+when physiology is not yet reliable; unreliable readings are excluded. Missing or
+stale samples or inactivity updates pause analysis. MATLAB failures are surfaced;
 there is no silent JavaScript replacement for MATLAB.
 
 Gemini automatically reviews the MATLAB report, latest Presage sample, inactivity,
@@ -58,13 +60,24 @@ blocks autoplay. Inactivity alone does not establish distraction, and physiologi
 changes do not diagnose stress, emotion or productivity.
 
 The Session panel shows camera status, MATLAB readiness, analysis count and the
-latest decision. The compact timer indicates when the camera is on. Existing
+latest decision. The Log tab shows Presage values, confidence and stability,
+validation feedback, MATLAB reports, and Gemini requests, responses and errors.
+Download JSON exports the retained log (the latest 180 events per session).
+Large SDK arrays retain their count and latest two entries; video is never logged.
+The compact timer indicates when the camera is on. Existing
 manual Chat remains available with bounded history. For a five-minute demo, expect
-roughly four to six automatic reviews if signal readiness and provider latency
+roughly four to six automatic reviews if fresh samples and provider latency
 permit; monitoring is not artificially cut short to achieve that count.
 
 Validation: `npm test`, `npm run build`, and `node scripts/verify-matlab.js`.
 The MATLAB verification uses synthetic data and does not call paid AI services.
+If Presage fails to start, run `node scripts/diagnose-presage.cjs` for a short
+startup probe with synthetic blank frames (no camera). It contacts Presage using
+the configured key and filters/redacts native diagnostics. HTTP 401 in device
+pairing or usage verification means the server rejected authentication; verify
+the active Physiology API key in the developer portal, update `.env`, then fully
+restart Electron. The SDK may report this as generic processing error 8 instead
+of authentication error 2. Do not infer a network outage from that generic code.
 `node scripts/verify-analysis.js` makes one live Gemini request using that synthetic
 MATLAB report; it requires the local Gemini key and consumes a small API request.
 
