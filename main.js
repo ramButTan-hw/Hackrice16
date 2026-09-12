@@ -5,15 +5,16 @@ const {
   SmartSpectraSDK, 
   PixelFormat, 
   breathingMetrics, 
-  cardioMetrics, 
+  faceMetrics, 
   decodeMetrics 
 } = require('@smartspectra/node-sdk');
-
 let mainWindow;
 let sdk = null;
 let isSessionActive = false;
 let startTimeUs = null;
 let lastTimestampUs = -1;
+
+
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -30,12 +31,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  const sdkDir = path.dirname(require.resolve('@smartspectra/node-sdk'));
+  console.log('SDK directory path:', sdkDir);
   createWindow();
 
   // Instantiate SDK wrapper without starting the pipeline yet
   sdk = new SmartSpectraSDK({
     apiKey: process.env.PRESAGE_API_KEY,
-    requestedMetrics: [...breathingMetrics, ...cardioMetrics],
+    requestedMetrics: [...breathingMetrics, ...(faceMetrics || ['face', 'facialExpression'])],
   });
 
   sdk.on('validationStatus', (code, ts, hint) => {
@@ -54,6 +57,12 @@ app.whenReady().then(() => {
 
 // Start an on-demand session
 ipcMain.on('start-session', () => {
+  console.log('[Main] Received start-session IPC');
+  if (!sdk) {
+    console.error('[Main] sdk instance is null!');
+    return;
+  }
+
   if (!sdk || isSessionActive) return;
 
   try {

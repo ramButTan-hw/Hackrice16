@@ -75,7 +75,7 @@
     </style>
   </head>
   <body>
-    <h2>Vital Signs Check</h2>
+    <h2>Breathing Rate/Facial Analysis for Emotion</h2>
     <video id="webcam-feed" autoplay playsinline muted></video>
 
     <div class="controls">
@@ -88,8 +88,9 @@
 
     <div class="vitals-grid">
       <div class="card">
-        <div>Pulse Rate</div>
-        <div class="value" id="pulse-display">-- BPM</div>
+        <div>Primary Emotion</div>
+        <div class="value" id="emotion-display">--</div>
+        <div class="subtext" id="emotion-confidence">Confidence: --%</div>
       </div>
       <div class="card">
         <div>Breathing Rate</div>
