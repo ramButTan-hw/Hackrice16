@@ -1,25 +1,20 @@
-const WINDOW_MS = 30000;
-const COOLDOWN_MS = 300000;
-
-function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now = Date.now, schedule = setTimeout, cancel = clearTimeout } = {}) {
-  let sdk, owner, timer, stopping;
-  let deadline = 0, nextAllowedAt = 0, lastFrame = -Infinity, lastMetric = 0, lastStamp = '';
+function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now = Date.now, idle = () => 0 } = {}) {
+  let sdk, owner, stopping;
+  let lastFrame = -Infinity, lastMetric = 0, lastStamp = '';
   const emit = value => { if (owner && !owner.isDestroyed()) owner.send('presage:event', value); };
   async function stop() {
     if (stopping) return stopping;
-    cancel(timer); deadline = 0;
     const current = sdk; sdk = null;
     stopping = (async () => {
       try { if (current) { try { await current.stopAsync(); } finally { await current.destroy(); } } }
-      finally { emit({ type: 'stopped', nextAllowedAt }); owner = null; }
+      finally { emit({ type: 'stopped' }); owner = null; }
     })();
     try { await stopping; } finally { stopping = null; }
   }
   return {
-    status: () => ({ active: Boolean(sdk), deadline, nextAllowedAt }),
+    status: () => ({ active: Boolean(sdk) }),
     async start(sender) {
-      if (sdk || stopping) throw new Error('A camera check-in is already running or stopping.');
-      if (now() < nextAllowedAt) throw new Error('Wait for the five-minute check-in cooldown.');
+      if (sdk || stopping) throw new Error('Camera monitoring is already running or stopping.');
       if (!process.env.PRESAGE_API_KEY) throw new Error('Add PRESAGE_API_KEY to .env and restart the desktop app.');
       const { SmartSpectraSDK, breathingMetrics, cardioMetrics, decodeMetrics } = loadSdk();
       owner = sender;
@@ -29,7 +24,7 @@ function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now 
         sdk.on('validationStatus', (code, _ts, hint) => emit({ type: 'validation', code, hint }));
         sdk.on('error', () => { emit({ type: 'error', message: 'Presage could not finish this reading. Check your key, credits, and connection.' }); void stop().catch(() => {}); });
         sdk.on('metrics', buf => {
-          if (!sdk || now() >= deadline || now() - lastMetric < 2000) return;
+          if (!sdk || now() - lastMetric < 2000) return;
           try {
             const metrics = decodeMetrics(buf);
             const pulse = metrics.cardio?.pulseRate?.at(-1);
@@ -40,19 +35,17 @@ function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now 
             lastStamp = stamp; lastMetric = now();
             const valid = (m, min, max) => Number.isFinite(m?.value) && m.value >= min && m.value <= max ? m.value : null;
             const confidence = m => m?.stable === true && Number.isFinite(m.confidence) ? Math.max(0, Math.min(1, m.confidence / 100)) : 0;
-            emit({ type: 'sample', sample: { timestamp: now(), source: 'presage', heartRate: valid(pulse, 20, 250), breathingRate: valid(breath, 1, 80), hrv: null, quality: Math.min(confidence(pulse), confidence(breath)), idleSeconds: 0, onBreak: false } });
+            const hrv = metrics.cardio?.hrv?.at(-1);
+            emit({ type: 'sample', sample: { timestamp: now(), source: 'presage', heartRate: valid(pulse, 20, 250), breathingRate: valid(breath, 1, 80), hrv: confidence(hrv) >= 0.7 ? valid({ value: hrv.rmssd }, 0, 500) : null, quality: Math.min(confidence(pulse), confidence(breath)), idleSeconds: idle(), onBreak: false } });
           } catch { /* Ignore malformed packets; do not invent readings. */ }
         });
         sdk.useCustomInput();
-        deadline = now() + WINDOW_MS;
         sdk.start();
-        nextAllowedAt = now() + COOLDOWN_MS;
-        timer = schedule(() => { void stop().catch(() => {}); }, WINDOW_MS);
         return this.status();
       } catch (error) { await stop(); throw error; }
     },
     frame(sender, frame) {
-      if (!sdk || sender !== owner || now() >= deadline) return false;
+      if (!sdk || sender !== owner) return false;
       // Bound IPC memory and drop excess frames instead of building a queue.
       if (now() - lastFrame < 30) return false;
       const { width, height, data } = frame || {};
@@ -64,4 +57,4 @@ function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now 
     stop,
   };
 }
-module.exports = { createPresage, WINDOW_MS, COOLDOWN_MS };
+module.exports = { createPresage };

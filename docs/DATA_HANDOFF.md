@@ -80,7 +80,7 @@ MATLAB R2026a is installed and licensed at `C:/Program Files/MATLAB/R2026a`. Bat
 & "C:/Program Files/MATLAB/R2026a/bin/matlab.exe" -batch "addpath('analytics'); analyzeSession('artifacts/demo-session.json','artifacts/matlab-report.json')"
 ```
 
-This creates a MATLAB-computed report plus a two-panel PNG chart beside it. The JSON averages can be compared against `artifacts/demo-summary.json`. No special toolbox is required. This is a file-based integration; automatic MATLAB invocation from API routes is not implemented.
+This creates a MATLAB-computed report plus a two-panel PNG chart beside it. The JSON averages can be compared against `artifacts/demo-summary.json`. No special toolbox is required. Continuous sessions now use server/matlab.js to keep one MATLAB process alive and analytics/analyzeWindow.m to compute rolling features every ten seconds. server/monitor.js sends compact MATLAB, Presage and activity snapshots to Gemini automatically, with six attempts per session and separate intervention cooldowns. The original exported-file report remains available.
 
 ## What we need from you
 

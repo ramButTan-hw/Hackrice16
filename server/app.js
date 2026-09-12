@@ -3,11 +3,13 @@ import { fileURLToPath } from 'node:url';
 import { configuredRepository } from './config.js';
 import { sessionService } from './session-service.js';
 import { generateReply } from './chat.js';
+import { monitoringService } from './monitor.js';
 
-export function createApp({ repository = configuredRepository(), now = Date.now } = {}) {
+export function createApp({ repository = configuredRepository(), now = Date.now, monitorOptions = {} } = {}) {
   const app = express();
   const sessions = sessionService(repository, now);
-  app.locals.close = () => repository.close();
+  const monitor = monitoringService({ sessions, now, ...monitorOptions });
+  app.locals.close = async () => { await monitor.close(); repository.close(); };
   app.disable('x-powered-by');
   app.use(express.json({ limit: '64kb' }));
   // This is a loopback-only, single-user backend. Reject cross-origin browser writes.
@@ -31,8 +33,11 @@ export function createApp({ repository = configuredRepository(), now = Date.now 
   app.get('/api/sessions/:id', async (req, res) => res.json(await sessions.get(req.params.id)));
   app.post('/api/sessions/:id/metrics', async (req, res) => res.json(await sessions.ingest(req.params.id, req.body)));
   app.get('/api/sessions/:id/state', async (req, res) => res.json(await sessions.state(req.params.id)));
+  app.post('/api/sessions/:id/activity', async (req, res) => res.json(await monitor.activity(req.params.id, req.body)));
+  app.post('/api/sessions/:id/monitor', async (req, res) => res.json(await monitor.configure(req.params.id, req.body)));
+  app.get('/api/sessions/:id/monitor', async (req, res) => res.json(await monitor.status(req.params.id)));
   app.post('/api/sessions/:id/interventions', async (req, res) => res.status(201).json(await sessions.intervene(req.params.id, req.body)));
-  app.post('/api/sessions/:id/end', async (req, res) => res.json(await sessions.end(req.params.id)));
+  app.post('/api/sessions/:id/end', async (req, res) => { await monitor.stop(req.params.id); res.json(await sessions.end(req.params.id)); });
   app.get('/api/sessions/:id/summary', async (req, res) => res.json(await sessions.summary(req.params.id)));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
   app.use(express.static(fileURLToPath(new URL('../dist', import.meta.url))));

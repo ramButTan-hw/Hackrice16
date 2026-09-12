@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor } = require('electron');
 const path = require('node:path');
 const { existsSync } = require('node:fs');
 if (existsSync('.env')) process.loadEnvFile('.env');
-const presage = require('./presage.cjs').createPresage();
+const presage = require('./presage.cjs').createPresage({ idle: () => powerMonitor.getSystemIdleTime() });
 const development = process.argv.includes('--dev');
 let server;
+let backend;
 let appUrl;
 
 function createWindow() {
@@ -23,6 +24,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
@@ -64,6 +66,7 @@ ipcMain.handle('presage:status', event => { trustedWindow(event); return presage
 ipcMain.handle('presage:start', event => { trustedWindow(event); return presage.start(event.sender); });
 ipcMain.handle('presage:stop', event => { trustedWindow(event); return presage.stop(); });
 ipcMain.handle('presage:frame', (event, frame) => { trustedWindow(event); return presage.frame(event.sender, frame); });
+ipcMain.handle('presage:idle', event => { trustedWindow(event); return powerMonitor.getSystemIdleTime(); });
 
 app.whenReady().then(async () => {
   if (development) {
@@ -71,12 +74,14 @@ app.whenReady().then(async () => {
   } else {
     const { createApp } = await import('../server/app.js');
     await new Promise((resolve, reject) => {
-      server = createApp().listen(0, '127.0.0.1', resolve);
+      backend = createApp();
+      server = backend.listen(0, '127.0.0.1', resolve);
       server.on('error', reject);
     });
     appUrl = 'http://127.0.0.1:' + server.address().port;
   }
   createWindow();
+  powerMonitor.on('suspend', () => { void presage.stop().catch(console.error); });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -92,5 +97,5 @@ let quitting = false;
 app.on('before-quit', event => {
   if (quitting) return;
   event.preventDefault(); quitting = true;
-  presage.stop().catch(console.error).finally(() => { server?.close(); app.quit(); });
+  presage.stop().catch(console.error).finally(async () => { await backend?.locals.close(); server?.close(); app.quit(); });
 });

@@ -20,36 +20,53 @@ session view. Drag the empty header area to move the window. Pinning is optional
 by default. Session start/end and history use the existing backend; no camera
 readings or AI messages are fabricated. Active sessions restore on reopening.
 
-## Camera check-ins and usage
+## Continuous monitoring and automatic analysis
 
-Set `PRESAGE_API_KEY` in your local `.env` and restart Electron. Start a session,
-then select **Take 30s reading**. The existing panel shows a camera preview,
-positioning feedback, countdown, and saved heart/breathing readings. The camera
-and SDK stop after 30 seconds, on cancellation, when leaving the Session tab or
-collapsing the panel, on session end, and on window close. No always-on preview.
-Check-ins have a five-minute cooldown enforced in the Electron main process
-(reset when the app restarts). Stop remains available during camera permission setup.
+Set `PRESAGE_API_KEY` and `GEMINI_API_KEY` in `.env`, then restart the desktop
+app and backend. `MATLAB_EXECUTABLE` defaults to the installed
+`C:/Program Files/MATLAB/R2026a/bin/matlab.exe`; use your own licensed installation
+on another machine. Start a session to open the camera and begin monitoring.
 
-Only breathing and cardio metrics are requested. No facial-expression classifier
-or Presage LLM insights are requested. Frames stay out of Gemini and the database;
-the Presage SDK processes them. SDK measurement confidence is converted from
-percent to the backend's 0–1 scale; unstable readings are not treated as reliable.
-Samples are saved at most once every two seconds. Last check-ins are labeled with
-their time, rather than presented as continuous monitoring. Brief check-ins may
-not produce enough stable readings to establish the existing 20-second baseline;
-the app retains an unknown/calibrating state instead of inventing a conclusion.
+Presage runs continuously until Pause monitoring, session end, window close or
+system suspend. Changing tabs, minimizing or collapsing does not reset capture.
+Only breathing and cardio metrics are requested. The preview shows positioning
+feedback; frames are processed by Presage, never sent to Gemini or stored in the
+session database. Samples are saved at most every two seconds. SDK confidence is
+converted from percent to 0–1, and unstable readings are not treated as reliable.
+Electron reads system inactivity every second, including during camera signal gaps.
 
-Recommended workflow: work with the local timer, take a check-in when useful,
-and ask Chat for help when needed. Gemini is called only on Send, with at most
-three prior exchanges and 6,000 characters of conversation, plus a small optional
-session context. Output is capped at 512 tokens. The visible chat retains older
-messages, but they are omitted from later requests. ElevenLabs remains opt-in.
-Polling session data and deriving state use local code, not model calls.
+One persistent MATLAB worker analyzes a rolling 60-second window every ten
+seconds. It computes averages, variability, slopes and changes relative to the
+first continuous 30 seconds of reliable baseline data. Automatic analysis waits
+at least the first session minute AND for sufficient reliable data. Elapsed time
+alone does not establish readiness. Missing or stale data pauses Gemini analysis;
+there is no silent JavaScript replacement for MATLAB.
 
-One 30-second check-in per five minutes means about 6 minutes of active capture
-per hour rather than 60. This is an activity estimate, not a billing guarantee;
-check your Presage account's credit policy. The manual workflow can use less.
-Continuous physiological monitoring is intentionally not provided by this mode.
+Gemini automatically reviews the MATLAB report, latest Presage sample, inactivity,
+task, and previous intervention every 60 seconds. A sustained signal/activity
+change can advance the next review, never sooner than 45 seconds after the last
+request. Six automatic attempts per session is a hard persisted budget, including
+failed calls; pause/resume and backend restart do not reset it. Responses are
+structured decisions with a 512-token output cap. For the default 2.5 Flash model,
+thinking is disabled for these small classification requests. Actual returned
+usage counts and decisions are recorded. These are separate from manual Chat calls.
+
+Gemini may choose no intervention. Delivered suggestions have a separate 90-second
+cooldown. Enable **Speak suggestions** for optional ElevenLabs audio; failed voice
+generation does not lose the text. Playback controls remain available if the OS
+blocks autoplay. Inactivity alone does not establish distraction, and physiological
+changes do not diagnose stress, emotion or productivity.
+
+The Session panel shows camera status, MATLAB readiness, analysis count and the
+latest decision. The compact timer indicates when the camera is on. Existing
+manual Chat remains available with bounded history. For a five-minute demo, expect
+roughly four to six automatic reviews if signal readiness and provider latency
+permit; monitoring is not artificially cut short to achieve that count.
+
+Validation: `npm test`, `npm run build`, and `node scripts/verify-matlab.js`.
+The MATLAB verification uses synthetic data and does not call paid AI services.
+`node scripts/verify-analysis.js` makes one live Gemini request using that synthetic
+MATLAB report; it requires the local Gemini key and consumes a small API request.
 
 Database/state/analytics setup and teammate contracts: [Data handoff](docs/DATA_HANDOFF.md).
 Run `npm test` for backend checks and `npm run demo:data` for a complete simulated session export.

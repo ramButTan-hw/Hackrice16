@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('presage', {
   start: () => ipcRenderer.invoke('presage:start'),
   stop: () => ipcRenderer.invoke('presage:stop'),
   frame: data => ipcRenderer.invoke('presage:frame', data),
+  idle: () => ipcRenderer.invoke('presage:idle'),
   subscribe: callback => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('presage:event', listener);

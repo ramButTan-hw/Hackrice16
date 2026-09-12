@@ -4,8 +4,9 @@ import { deriveState } from './state-engine.js';
 import { summarize } from './analytics.js';
 
 export function sessionService(repository, now = Date.now) {
+  const writes = new Map();
   async function get(id) { const s = await repository.get(id); if (!s) fail('Session not found.', 404); return s; }
-  async function change(id, update) {
+  async function commit(id, update) {
     const s = await get(id);
     if (s.status !== 'active') fail('Session has ended.', 409);
     const revision = s.revision;
@@ -13,7 +14,14 @@ export function sessionService(repository, now = Date.now) {
     await repository.save(s, revision);
     return s;
   }
+  function change(id, update) {
+    const pending = (writes.get(id) || Promise.resolve()).catch(() => {}).then(() => commit(id, update));
+    writes.set(id, pending);
+    pending.finally(() => { if (writes.get(id) === pending) writes.delete(id); }).catch(() => {});
+    return pending;
+  }
   return {
+    update: change,
     async start(body) {
       const goal = text(body?.goal, 'goal');
       const source = body?.source ?? 'demo';
@@ -42,7 +50,7 @@ export function sessionService(repository, now = Date.now) {
         s.interventions.push({ id: randomUUID(), timestamp: now(), text: message, provider: body.provider, state: deriveState(s, now()).state });
       });
     },
-    end(id) { return change(id, s => { s.status = 'ended'; s.endedAt = now(); }); },
+    end(id) { return change(id, s => { s.status = 'ended'; s.endedAt = now(); if (s.monitor) s.monitor.enabled = false; }); },
     async summary(id) { return summarize(await get(id), now()); },
   };
 }

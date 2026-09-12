@@ -159,3 +159,6 @@ button:focus-visible, input:focus-visible, summary:focus-visible { outline-color
 .camera-checkin video[hidden] { display: none; }
 .camera-actions button { flex-shrink: 0; border: 1px solid rgb(var(--accent-rgb) / .25); border-radius: 8px; background: rgb(var(--accent-rgb) / .12); padding: 8px 10px; color: var(--text); font-size: 11px; }
 .camera-actions span { text-align: right; font-size: 9px; }
+.monitor-status { margin-top: 10px; border-top: 1px solid rgb(var(--accent-rgb) / .15); padding-top: 6px; font-size: 10px; color: var(--subtle); }
+.monitor-status audio { width: 100%; height: 32px; margin-top: 8px; }
+.camera-actions label { display: flex; align-items: center; gap: 4px; font-size: 10px; }
