@@ -1,5 +1,12 @@
 # Hackrice16
 
+Chat: set `GEMINI_API_KEY` in your local `.env` and restart the server. Optionally
+set `GEMINI_MODEL` (default `gemini-2.5-flash`). The Chat tab sends text to Gemini
+through the Node backend. “Include session” shares the task and interpreted state,
+not raw camera frames. Enter sends; Shift+Enter adds a line. Chat history stays in
+memory while the app is open (including when collapsed); Clear chat removes it.
+Chat cannot control the app or computer. Keep API keys on the server.
+
 The frontend is a minimal smoked-green glass session panel. Use the top-right
 collapse button to shrink Electron into a compact timer pill; expand restores the
 session view. Drag the empty header area to move the window. Pinning is optional and off

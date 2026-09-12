@@ -2,13 +2,14 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { configuredRepository } from './config.js';
 import { sessionService } from './session-service.js';
+import { generateReply } from './chat.js';
 
 export function createApp({ repository = configuredRepository(), now = Date.now } = {}) {
   const app = express();
   const sessions = sessionService(repository, now);
   app.locals.close = () => repository.close();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '16kb' }));
+  app.use(express.json({ limit: '64kb' }));
   // This is a loopback-only, single-user backend. Reject cross-origin browser writes.
   app.use('/api', (request, response, next) => {
     const origin = request.get('origin');
@@ -17,6 +18,13 @@ export function createApp({ repository = configuredRepository(), now = Date.now 
   });
   app.get('/api/health', (_request, response) => {
     response.json({ ok: true, node: process.versions.node, storage: repository.kind });
+  });
+  let chatPending = false;
+  app.post('/api/chat', async (req, res) => {
+    if (chatPending) return res.status(429).json({ error: 'A reply is already in progress.' });
+    chatPending = true;
+    try { res.json(await generateReply(req.body, { sessions })); }
+    finally { chatPending = false; }
   });
   app.get('/api/sessions', async (_req, res) => res.json(await sessions.list()));
   app.post('/api/sessions', async (req, res) => res.status(201).json(await sessions.start(req.body)));
