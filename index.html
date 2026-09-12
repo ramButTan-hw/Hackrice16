@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SmartSpectra On-Demand Measurement</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px;
+        background: #0f172a;
+        color: #f8fafc;
+      }
+      video {
+        width: 560px;
+        height: 315px;
+        background: #000;
+        border-radius: 8px;
+        transform: scaleX(-1);
+        border: 2px solid #334155;
+      }
+      .controls {
+        margin-top: 15px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      button {
+        padding: 10px 18px;
+        border-radius: 6px;
+        border: none;
+        font-size: 15px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      #start-btn {
+        background: #0284c7;
+        color: white;
+      }
+      #start-btn:disabled {
+        background: #475569;
+        cursor: not-allowed;
+      }
+      #stop-btn {
+        background: #dc2626;
+        color: white;
+      }
+      .vitals-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-top: 20px;
+        width: 560px;
+      }
+      .card {
+        background: #1e293b;
+        padding: 16px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        text-align: center;
+      }
+      .value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #38bdf8;
+        margin-top: 6px;
+      }
+      #status-hint {
+        color: #fbbf24;
+        font-weight: 500;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Breathing Rate/Facial Analysis for Emotion</h2>
+    <video id="webcam-feed" autoplay playsinline muted></video>
+
+    <div class="controls">
+      <button id="start-btn">Start 30s Reading</button>
+      <button id="stop-btn" disabled>Stop</button>
+      <span id="countdown"></span>
+    </div>
+
+    <p id="status-hint">Camera ready. Position face in view and click start.</p>
+
+    <div class="vitals-grid">
+      <div class="card">
+        <div>Primary Emotion</div>
+        <div class="value" id="emotion-display">--</div>
+        <div class="subtext" id="emotion-confidence">Confidence: --%</div>
+      </div>
+      <div class="card">
+        <div>Breathing Rate</div>
+        <div class="value" id="breathing-display">-- BrPM</div>
+      </div>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

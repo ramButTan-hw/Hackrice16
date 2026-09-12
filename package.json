@@ -1,0 +1,27 @@
+{
+  "name": "hackrice16",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ramButTan-hw/Hackrice16.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ramButTan-hw/Hackrice16/issues"
+  },
+  "homepage": "https://github.com/ramButTan-hw/Hackrice16#readme",
+  "dependencies": {
+    "@smartspectra/node-sdk": "^3.3.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0"
+  }
+}
