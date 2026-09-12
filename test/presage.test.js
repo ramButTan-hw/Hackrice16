@@ -2,6 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { createPresage } = createRequire(import.meta.url)('../electron/presage.cjs');
+const { presageError } = createRequire(import.meta.url)('../electron/presage.cjs');
+
+test('Presage errors distinguish authentication, credits, network and processing while redacting keys', () => {
+  const previous = process.env.PRESAGE_API_KEY;
+  process.env.PRESAGE_API_KEY = 'private-test-key';
+  try {
+    assert.match(presageError(2, '', false).message, /authentication/);
+    assert.match(presageError(4, '', false).message, /credits/);
+    assert.match(presageError(5, '', true).message, /network/);
+    const failure = presageError(8, 'Failure with private-test-key', true);
+    assert.equal(failure.code, 8); assert.equal(failure.retryable, true);
+    assert.equal(failure.detail, 'Failure with [redacted]');
+    assert.doesNotMatch(failure.message, /Check your key/);
+  } finally { previous === undefined ? delete process.env.PRESAGE_API_KEY : process.env.PRESAGE_API_KEY = previous; }
+});
 
 test('continuous monitoring survives five minutes, bounds frames, tracks idle and tears down', async () => {
   const oldKey = process.env.PRESAGE_API_KEY;
@@ -34,9 +49,19 @@ test('continuous monitoring survives five minutes, bounds frames, tracks idle an
     instance.handlers.metrics({ cardio: { pulseRate: [metric] }, breathing: { rate: [{ ...metric, value: 15 }] } });
     assert.equal(events.at(-1).sample.quality, .85);
     assert.equal(events.at(-1).sample.heartRate, 70); assert.equal(events.at(-1).sample.idleSeconds, 47);
+    assert.ok(events.some(e => e.type === 'metrics' && e.data.cardio.pulseRate.latest[0].confidence === 85));
     const count = events.length;
     instance.handlers.metrics({ cardio: { pulseRate: [metric] } });
     assert.equal(events.length, count);
+    now += 2100;
+    instance.handlers.metrics({ breathing: { rate: [{ value: 16, stable: true, confidence: 90, timestamp: now * 1000 }] } });
+    assert.equal(events.at(-1).sample.heartRate, 70);
+    assert.equal(events.at(-1).sample.breathingRate, 16);
+    assert.equal(events.at(-1).sample.qualityByMetric.heartRate, .85);
+    now += 11000;
+    instance.handlers.metrics({ breathing: { rate: [{ value: 17, stable: true, confidence: 90, timestamp: now * 1000 }] } });
+    assert.equal(events.at(-1).sample.heartRate, null);
+    assert.equal(events.at(-1).sample.qualityByMetric.breathingRate, .9);
     now += 300000;
     assert.equal(controller.frame(sender, frame), true);
     await controller.stop();

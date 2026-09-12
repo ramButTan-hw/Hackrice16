@@ -13,6 +13,14 @@ test('speech sends server credentials and returns playable audio', async () => {
   assert.equal(result.audio, 'data:audio/mpeg;base64,YXVkaW8=');
 });
 
+test('closing voice cancels an in-flight speech request', async () => {
+  const controller=new AbortController();
+  let started;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const result=generateSpeech('Hello',{apiKey:'test',signal:controller.signal,fetcher:async(_url,{signal})=>new Promise((_resolve,reject)=>{signal.addEventListener('abort',()=>reject(new Error('Aborted')),{once:true});started();})});
+  await ready;controller.abort();assert.equal((await result).audio,undefined);
+});
+
 test('missing credentials and provider failures return safe speech errors', async () => {
   assert.ok((await generateSpeech('Hi', { apiKey: '' })).audioError);
   for (const fetcher of [

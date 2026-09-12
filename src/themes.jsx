@@ -19,6 +19,15 @@ export function useTheme() {
     } catch { return defaults; }
   });
   useEffect(() => {
+    const sync=event=>{
+      if(event.key!=='ui.appearance')return;
+      try{const next=JSON.parse(event.newValue);if(!themes.some(t=>t.id===next?.theme)||!Number.isFinite(next.opacity))return;
+        setSettings(previous=>previous.theme===next.theme&&previous.opacity===next.opacity?previous:{theme:next.theme,opacity:Math.min(98,Math.max(86,next.opacity))});
+      }catch{}
+    };
+    window.addEventListener('storage',sync);return()=>window.removeEventListener('storage',sync);
+  },[]);
+  useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
     document.documentElement.style.setProperty('--glass-opacity', settings.opacity / 100);
     try { localStorage.setItem('ui.appearance', JSON.stringify(settings)); } catch {}
@@ -35,13 +44,18 @@ export function ThemePicker({ settings, onChange }) {
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
+  if(window.companionWindow?.appearance)return <button type="button" className="icon-button" aria-label="Customize theme" title="Customize theme" onClick={()=>window.companionWindow.appearance()}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none"/></svg></button>;
   return <details className="theme-picker" ref={panel} onKeyDown={event => {
     if (event.key === 'Escape') { panel.current.open = false; panel.current.querySelector('summary').focus(); }
   }}>
     <summary className="icon-button" aria-label="Customize theme" title="Customize theme">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none"/></svg>
     </summary>
-    <div className="theme-popover">
+    <AppearanceControls settings={settings} onChange={onChange}/>
+  </details>;
+}
+
+function AppearanceControls({settings,onChange}){return (    <div className="theme-popover">
       <fieldset><legend>Theme</legend><div className="theme-options">
         {themes.map(theme => <button type="button" key={theme.id} aria-pressed={settings.theme === theme.id} onClick={() => onChange({ ...settings, theme: theme.id })}>
           <span className="theme-swatch" style={{ background: theme.swatch }} aria-hidden="true">{settings.theme === theme.id ? '✓' : ''}</span>{theme.name}
@@ -49,6 +63,5 @@ export function ThemePicker({ settings, onChange }) {
       </div></fieldset>
       <label className="opacity-label" htmlFor="glass-opacity">Glass opacity <output htmlFor="glass-opacity">{settings.opacity}%</output></label>
       <input id="glass-opacity" type="range" min="86" max="98" step="1" value={settings.opacity} onChange={event => onChange({ ...settings, opacity: Number(event.target.value) })}/>
-    </div>
-  </details>;
-}
+    </div>);}
+export function AppearanceWindow(){const [settings,onChange]=useTheme();return <main className="appearance-window"><h1>Appearance</h1><p>Changes apply to your companion immediately.</p><AppearanceControls settings={settings} onChange={onChange}/></main>;}
