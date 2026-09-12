@@ -1,5 +1,8 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('node:path');
+const { existsSync } = require('node:fs');
+if (existsSync('.env')) process.loadEnvFile('.env');
+const presage = require('./presage.cjs').createPresage();
 const development = process.argv.includes('--dev');
 let server;
 let appUrl;
@@ -28,6 +31,9 @@ function createWindow() {
     if (new URL(url).origin !== new URL(appUrl).origin) event.preventDefault();
   });
   window.loadURL(appUrl);
+  window.on('closed', () => { void presage.stop().catch(console.error); });
+  window.webContents.on('render-process-gone', () => { void presage.stop().catch(console.error); });
+  window.webContents.on('did-start-loading', () => { void presage.stop().catch(console.error); });
 }
 
 // Expose only window controls to the trusted top-level renderer.
@@ -54,6 +60,10 @@ ipcMain.handle('window:pinned', (event, pinned) => {
 });
 ipcMain.on('window:minimize', event => trustedWindow(event).minimize());
 ipcMain.on('window:close', event => trustedWindow(event).close());
+ipcMain.handle('presage:status', event => { trustedWindow(event); return presage.status(); });
+ipcMain.handle('presage:start', event => { trustedWindow(event); return presage.start(event.sender); });
+ipcMain.handle('presage:stop', event => { trustedWindow(event); return presage.stop(); });
+ipcMain.handle('presage:frame', (event, frame) => { trustedWindow(event); return presage.frame(event.sender, frame); });
 
 app.whenReady().then(async () => {
   if (development) {
@@ -78,4 +88,9 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', () => server?.close());
+let quitting = false;
+app.on('before-quit', event => {
+  if (quitting) return;
+  event.preventDefault(); quitting = true;
+  presage.stop().catch(console.error).finally(() => { server?.close(); app.quit(); });
+});

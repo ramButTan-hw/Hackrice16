@@ -20,6 +20,37 @@ session view. Drag the empty header area to move the window. Pinning is optional
 by default. Session start/end and history use the existing backend; no camera
 readings or AI messages are fabricated. Active sessions restore on reopening.
 
+## Camera check-ins and usage
+
+Set `PRESAGE_API_KEY` in your local `.env` and restart Electron. Start a session,
+then select **Take 30s reading**. The existing panel shows a camera preview,
+positioning feedback, countdown, and saved heart/breathing readings. The camera
+and SDK stop after 30 seconds, on cancellation, when leaving the Session tab or
+collapsing the panel, on session end, and on window close. No always-on preview.
+Check-ins have a five-minute cooldown enforced in the Electron main process
+(reset when the app restarts). Stop remains available during camera permission setup.
+
+Only breathing and cardio metrics are requested. No facial-expression classifier
+or Presage LLM insights are requested. Frames stay out of Gemini and the database;
+the Presage SDK processes them. SDK measurement confidence is converted from
+percent to the backend's 0–1 scale; unstable readings are not treated as reliable.
+Samples are saved at most once every two seconds. Last check-ins are labeled with
+their time, rather than presented as continuous monitoring. Brief check-ins may
+not produce enough stable readings to establish the existing 20-second baseline;
+the app retains an unknown/calibrating state instead of inventing a conclusion.
+
+Recommended workflow: work with the local timer, take a check-in when useful,
+and ask Chat for help when needed. Gemini is called only on Send, with at most
+three prior exchanges and 6,000 characters of conversation, plus a small optional
+session context. Output is capped at 512 tokens. The visible chat retains older
+messages, but they are omitted from later requests. ElevenLabs remains opt-in.
+Polling session data and deriving state use local code, not model calls.
+
+One 30-second check-in per five minutes means about 6 minutes of active capture
+per hour rather than 60. This is an activity estimate, not a billing guarantee;
+check your Presage account's credit policy. The manual workflow can use less.
+Continuous physiological monitoring is intentionally not provided by this mode.
+
 Database/state/analytics setup and teammate contracts: [Data handoff](docs/DATA_HANDOFF.md).
 Run `npm test` for backend checks and `npm run demo:data` for a complete simulated session export.
 

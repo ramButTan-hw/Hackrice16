@@ -13,7 +13,14 @@ test('chat sends bounded history and optional session context without executing 
   const body = JSON.parse(request.body);
   assert.ok(body.systemInstruction.parts[0].text.includes('Study'));
   assert.equal(body.tools, undefined);
+  assert.equal(body.generationConfig.maxOutputTokens, 512);
   assert.equal(request.headers['x-goog-api-key'], 'test-key');
+});
+
+test('chat rejects history over the usage budget before calling Gemini', async () => {
+  const options = { apiKey: 'test', fetcher: () => { throw new Error('must not call provider'); } };
+  await assert.rejects(generateReply({ messages: Array.from({ length: 9 }, (_, i) => ({ role: i % 2 ? 'model' : 'user', text: 'Hi' })) }, options), { status: 400 });
+  await assert.rejects(generateReply({ messages: Array.from({ length: 5 }, (_, i) => ({ role: i % 2 ? 'model' : 'user', text: 'a'.repeat(1500) })) }, options), { status: 400 });
 });
 
 test('missing configuration and malformed history fail clearly', async () => {

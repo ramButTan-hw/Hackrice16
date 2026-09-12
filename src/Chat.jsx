@@ -15,8 +15,8 @@ export default function Chat({ visible, sessionId }) {
     if (inFlight.current || !draft.trim()) return;
     inFlight.current = true; setBusy(true); setError('');
     const question = { role: 'user', text: draft.trim() };
-    const context = [...messages.slice(-10).map(m => ({ role: m.role, text: m.text.slice(0, 2000) })), question];
-    while (context.reduce((sum, m) => sum + m.text.length, 0) > 12000 && context.length > 1) context.splice(0, 2);
+    const context = [...messages.slice(-6).map(m => ({ role: m.role, text: m.text.slice(0, 2000) })), question];
+    while (context.reduce((sum, m) => sum + m.text.length, 0) > 6000 && context.length > 1) context.splice(0, 2);
     try {
       const response = await fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
