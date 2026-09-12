@@ -1,5 +1,8 @@
 # Hackrice16
 
+Database/state/analytics setup and teammate contracts: [Data handoff](docs/DATA_HANDOFF.md).
+Run `npm test` for backend checks and `npm run demo:data` for a complete simulated session export.
+
 React + Vite frontend, Electron desktop shell, and an Express API on Node.js.
 
 ## Requirements

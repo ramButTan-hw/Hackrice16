@@ -8,6 +8,8 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "test": "node --test",
+    "demo:data": "node scripts/demo-data.js",
     "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:web\" \"npm:dev:electron\"",
     "dev:web": "vite --host 127.0.0.1",
     "dev:server": "node --watch server/index.js",
