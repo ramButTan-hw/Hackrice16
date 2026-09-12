@@ -1,6 +1,7 @@
 import { fail } from '../shared/contracts.js';
+import { generateSpeech } from './speech.js';
 
-export async function generateReply(body, { sessions, apiKey = process.env.GEMINI_API_KEY, model = process.env.GEMINI_MODEL || 'gemini-2.5-flash', fetcher = fetch }) {
+export async function generateReply(body, { sessions, apiKey = process.env.GEMINI_API_KEY, model = process.env.GEMINI_MODEL || 'gemini-2.5-flash', fetcher = fetch, speech = generateSpeech }) {
   const messages = body?.messages;
   if (!Array.isArray(messages) || !messages.length || messages.length > 12
     || messages.some(m => !m || !['user', 'model'].includes(m.role) || typeof m.text !== 'string' || !m.text.trim() || m.text.length > 2000)
@@ -32,5 +33,5 @@ export async function generateReply(body, { sessions, apiKey = process.env.GEMIN
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('\n').trim();
   if (!text) fail('Gemini returned no text. Try rephrasing your question.', 502);
-  return { text };
+  return { text, ...(body.speak === true ? await speech(text) : {}) };
 }

@@ -7,6 +7,13 @@ not raw camera frames. Enter sends; Shift+Enter adds a line. Chat history stays 
 memory while the app is open (including when collapsed); Clear chat removes it.
 Chat cannot control the app or computer. Keep API keys on the server.
 
+Optional speech: set `ELEVENLABS_API_KEY` in `.env` and restart. Enable **Voice
+reply** before sending, then use the reply's audio controls to listen. Reply text
+is sent to ElevenLabs only when enabled; text chat still works if speech fails.
+`ELEVENLABS_VOICE_ID` and `ELEVENLABS_MODEL` override the default voice and
+`eleven_v3` model. This uses the [ElevenLabs REST API](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
+through the existing backend, with no additional SDK dependencies.
+
 The frontend is a minimal smoked-green glass session panel. Use the top-right
 collapse button to shrink Electron into a compact timer pill; expand restores the
 session view. Drag the empty header area to move the window. Pinning is optional and off
