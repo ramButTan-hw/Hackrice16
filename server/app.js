@@ -1,3 +1,4 @@
+import {generateImage} from './image-generation.js';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { configuredRepository } from './config.js';
@@ -8,22 +9,32 @@ import { appendEvent } from './event-log.js';
 import { assistanceState, answerCheckin } from './break-score.js';
 import { transcribe } from './transcription.js';
 import { memoryService } from './memory.js';
+import {googleAuth} from './google-auth.js';
+import {googleWorkspace} from './google-workspace.js';
 
 export function createApp({ repository = configuredRepository(), now = Date.now, monitorOptions = {} } = {}) {
   const app = express();
   const memory=memoryService();
+  const google=googleAuth(),workspace=googleWorkspace({auth:google});
   const sessions = sessionService(repository, now);
   const monitor = monitoringService({ sessions, now, ...monitorOptions });
   app.locals.close = async () => { await monitor.close(); repository.close(); };
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '3mb' }));
+  app.use((req,res,next)=>express.json({limit:req.path.match(/^\/api\/google\/actions\/[^/]+\/image$/)?'15mb':'3mb'})(req,res,next));
   // This is a loopback-only, single-user backend. Reject cross-origin browser writes.
   app.use('/api', (request, response, next) => {
     const origin = request.get('origin');
     if (origin && origin !== `http://${request.get('host')}` && origin !== 'http://127.0.0.1:5173' && origin !== 'http://127.0.0.1:4173') return response.status(403).json({ error: 'Origin not allowed.' });
     next();
   });
-  app.get('/api/health', (_request, response) => {
+  let imagePending=false;
+  app.post('/api/images/generate',async(req,res)=>{
+    if(imagePending)return res.status(429).json({error:'An image is already generating. Please wait.'});
+    imagePending=true;const controller=new AbortController();const cancel=()=>controller.abort();res.on('close',cancel);
+    try{const image=await generateImage(req.body?.prompt,{aspectRatio:req.body?.aspectRatio||'1:1',signal:controller.signal});res.set('Cache-Control','no-store').json({image});}
+    finally{imagePending=false;res.removeListener('close',cancel);}
+  });
+  app.get('/api/health' , (_request, response) => {
     response.json({ ok: true, node: process.versions.node, storage: repository.kind });
   });
   let chatPending = false;
@@ -33,6 +44,22 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
     transcriptionPending=true;try{res.json(await transcribe(req.body,req.get('content-type')));}finally{transcriptionPending=false;}
   });
   app.get('/api/companion/config',(_req,res)=>res.json({transcription:Boolean(process.env.ELEVENLABS_API_KEY),memory:memory.configured}));
+  app.get('/api/google/status',(_req,res)=>{const {accountId,...status}=google.status();res.json(status);});
+  app.post('/api/google/connect',(_req,res)=>res.json(google.begin()));
+  app.post('/api/google/disconnect',(_req,res)=>{google.disconnect();res.json({connected:false});});
+  app.get('/oauth/google/callback',async(req,res)=>{try{await google.callback(req.query);res.set('Content-Security-Policy',"default-src 'none'").type('html').send('<h1>Google connected</h1><p>You can close this tab and return to Jarvis.</p>');}catch(e){res.status(e.status||500).type('text').send(e.status?e.message:'Google sign-in failed. Return to Jarvis and try again.');}});
+  app.get('/api/google/items',async(_req,res)=>res.json(await workspace.context()));
+  app.post('/api/google/actions/:id/image',express.json({limit:'15mb'}),async(req,res)=>res.json(workspace.attachImage(req.params.id,req.body?.conversationId,req.body?.index,req.body?.image,req.body?.prompt)));
+  app.post('/api/google/actions/:id/illustrate',async(req,res)=>res.json(await workspace.illustrate(req.params.id,req.body?.conversationId)));
+  app.post('/api/google/actions/:id/confirm',async(req,res)=>{
+    const result=await workspace.execute(req.params.id,req.body?.conversationId);
+    if(result.status==='done'&&req.body?.memory!==false&&memory.configured){
+        // Content stays in Google; remember the destination so future work can resume.
+        void (async()=>{const source=req.body.sessionId?(await sessions.get(req.body.sessionId)).source:'real';await memory.save('Created/updated Google item: '+JSON.stringify(result.result),source,{kind:'google_item'});})().catch(()=>{});
+    }
+    res.json(result);
+  });
+  app.post('/api/google/actions/:id/cancel',(req,res)=>res.json(workspace.cancel(req.params.id,req.body?.conversationId)));
   const memorySource=async req=>req.query.sessionId?(await sessions.get(req.query.sessionId)).source:'real';
   app.get('/api/memories',async(req,res)=>res.json({memories:await memory.list(await memorySource(req))}));
   app.delete('/api/memories/:id',async(req,res)=>res.json(await memory.remove(req.params.id,await memorySource(req))));
@@ -42,7 +69,7 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
     const controller=new AbortController();const cancel=()=>controller.abort();res.on('close',cancel);
     res.setHeader('Content-Type','application/x-ndjson');res.setHeader('Cache-Control','no-store');
     const send=data=>{if(!res.destroyed)res.write(JSON.stringify(data)+'\n');};
-    try{const result=await generateReply({...req.body,speak:false},{sessions,memory,signal:controller.signal,onText:text=>send({text})});send({done:true,...result});}
+    try{const result=await generateReply({...req.body,speak:false},{sessions,memory,workspace,signal:controller.signal,onText:text=>send({text})});send({done:true,...result});}
     catch(e){send({error:e.status?e.message:'Reply interrupted. Please try again.'});}
     finally{chatPending=false;res.removeListener('close',cancel);res.end();}
   });

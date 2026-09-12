@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, powerMonitor, desktopCapturer, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, desktopCapturer, globalShortcut, shell } = require('electron');
 const path = require('node:path');
 const { existsSync } = require('node:fs');
 if (existsSync('.env')) process.loadEnvFile('.env');
@@ -136,6 +136,13 @@ ipcMain.handle('help:snapshot',async event=>{
   const source=sources.find(s=>s.display_id===String(display.id));
   if(!source||source.thumbnail.isEmpty())throw new Error('Could not capture this display.');
   return source.thumbnail.toJPEG(70).toString('base64');
+});
+ipcMain.handle('google:open',async(event,value)=>{
+  if(event.sender!==helpPanel?.webContents)trustedWindow(event);
+  if(typeof value!=='string'||value.length>10000)throw new Error('Invalid Google link.');
+  const url=new URL(value);
+  if(url.protocol!=='https:'||url.username||url.password||!((url.hostname==='accounts.google.com'&&url.pathname==='/o/oauth2/v2/auth')||(url.hostname==='docs.google.com'&&(url.pathname.startsWith('/document/d/')||url.pathname.startsWith('/presentation/d/')))||(url.hostname==='calendar.google.com'&&url.pathname.startsWith('/calendar/'))))throw new Error('Only Google sign-in, Docs, and Calendar links can be opened.');
+  await shell.openExternal(url.href);
 });
 ipcMain.handle('help:reveal',event=>{const window=activeHelp(event);window.show();window.flashFrame(true);});
 

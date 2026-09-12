@@ -15,7 +15,7 @@ export default function Assistance({session}){
   async function answer(value){
     if(value==='listening'){setListening(true);return;}if(value==='idle'){setListening(false);return;}
     if(value==='close'){setOpen(false);setListening(false);}
-    try{const next=await api(id,value==='close'?'dismiss':value);setData(next);if(['fine','break_start'].includes(value)){setOpen(false);setListening(false);}}catch(e){setError(e.message);}
+    try{const next=await api(id,value);setData(next);if(['fine','break_start'].includes(value)){setOpen(false);setListening(false);}}catch(e){setError(e.message);}
   }
   useEffect(()=>{
     setOpen(false);seen.current=null;setData(session?.assistance??{});if(!active)return;

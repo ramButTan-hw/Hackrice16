@@ -1,5 +1,7 @@
 # Database, analytics, and state engine — morning handoff
 
+> Historical database implementation handoff. For current installation and companion behavior, use [Device setup](DEVICE_SETUP.md). Some integration/status descriptions below predate the completed app.
+
 ## What works now
 
 Start `npm run dev:server`. SQLite is created at `data/companion.sqlite` and survives restarts. No keys required. Run `npm test` and `npm run demo:data` to exercise the complete data loop. The demo creates a separate database and export files under `artifacts/`; it never connects to Supabase.

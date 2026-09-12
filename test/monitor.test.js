@@ -33,6 +33,12 @@ test('long work block asks once without camera data',async t=>{
   const f=await fixture(t);f.setTime(2400);await f.monitor.tick();assert.equal(f.calls.length,1);assert.equal(f.calls[0].physiologyReliable,false);
   f.setTime(2500);await f.monitor.tick();assert.equal(f.calls.length,1);
 });
+test('closing normal Jarvis help before the pulse rise does not suppress the review',async t=>{
+  const f=await fixture(t);
+  await f.sessions.update(f.id,s=>answerCheckin(s,{answer:'close',actionId:'normal-chat'},s.startedAt+40000));
+  for(const n of [60,70,80,90,100,110,120,130]){await f.observe(n);await f.monitor.tick();}
+  assert.equal(f.calls.length,1);assert.ok((await f.sessions.get(f.id)).assistance.checkin);
+});
 for(const action of ['pause','end'])test(`${action} cancels in-flight delivery`,async t=>{
   let finish,begin;const started=new Promise(r=>{begin=r;});
   const f=await fixture(t,{insight:async()=>{begin();return new Promise(r=>{finish=r;});}});
