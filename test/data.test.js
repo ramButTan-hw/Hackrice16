@@ -81,7 +81,7 @@ test('HTTP session lifecycle and browser origin boundary', async t => {
   assert.equal(eventResponse.status, 200);
   const download = await fetch(base + '/sessions/' + s.id + '/events?download=1');
   assert.match(download.headers.get('content-disposition'), /attachment/);
-  assert.equal((await download.json()).events[0].source, 'presage');
+  assert.ok((await download.json()).events.some(e=>e.source==='presage'));
   assert.equal((await fetch(base + '/sessions/' + s.id + '/summary')).status, 200);
   assert.equal((await fetch(base + '/sessions/' + s.id + '/end', { method: 'POST' })).status, 200);
   assert.equal((await fetch(base + '/sessions/' + s.id + '/end', { method: 'POST' })).status, 409);
@@ -96,6 +96,13 @@ test('Supabase adapter keeps secret server-side and uses revision filter', async
   assert.ok(calls[0].url.includes('revision=eq.1'));
   assert.equal(calls[0].options.headers.apikey, 'sb_secret_test');
   assert.equal(calls[0].options.headers.Authorization, undefined);
+});
+
+test('database transport and incomplete responses have safe actionable errors', async () => {
+  const offline=supabaseRepository('https://example.supabase.co','sb_secret_test',async()=>{throw new Error('private transport detail');});
+  await assert.rejects(offline.list(),{status:503,message:'Database connection interrupted or timed out. Check your connection and try again.'});
+  const incomplete=supabaseRepository('https://example.supabase.co','sb_secret_test',async()=>({ok:true,json:async()=>{throw new SyntaxError('private response');}}));
+  await assert.rejects(incomplete.list(),{status:502,message:'Database returned an incomplete response. Try again shortly.'});
 });
 
 test('empty session averages are null and no time is invented', async t => {

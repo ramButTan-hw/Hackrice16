@@ -12,7 +12,7 @@ The React starter remains available for your UI teammate. This change implements
 2. UI owner starts a session and retains the returned ID.
 3. Presage owner posts real numeric samples using the exact contract below.
 4. AI owner reads `workState.shouldIntervene`, gets Gemini text, logs the intervention, and speaks it through ElevenLabs.
-5. End the session, retrieve the summary, and export the session JSON for MATLAB.
+5. End the session, retrieve the summary, and export the session JSON for review.
 
 First prove this loop together before adding widgets. Each teammate should own their integration files and avoid changing shared field names without coordinating.
 
@@ -72,21 +72,18 @@ For Supabase:
 
 Do not paste keys into chat, commit `.env`, or prefix the secret with `VITE_`. The migration enables RLS and gives no anon/authenticated access; only the trusted backend uses the secret. This API is for one user's loopback development environment, not a public multi-user deployment. Do not distribute an Electron build containing the team secret; multi-user production needs a hosted authenticated backend and per-user policies.
 
-## MathWorks
+## Local analysis
 
-MATLAB R2026a is installed and licensed at `C:/Program Files/MATLAB/R2026a`. Batch execution was verified on September 12, 2026: report and chart generation succeeded, and all three averages and sample counts matched the JavaScript summary. Generate a fixture with `npm run demo:data`, then from the repository root run:
-
-```powershell
-& "C:/Program Files/MATLAB/R2026a/bin/matlab.exe" -batch "addpath('analytics'); analyzeSession('artifacts/demo-session.json','artifacts/matlab-report.json')"
-```
-
-This creates a MATLAB-computed report plus a two-panel PNG chart beside it. The JSON averages can be compared against `artifacts/demo-summary.json`. No special toolbox is required. Continuous sessions now use server/matlab.js to keep one MATLAB process alive and analytics/analyzeWindow.m to compute rolling features every ten seconds. server/monitor.js sends compact MATLAB, Presage and activity snapshots to Gemini automatically, with six attempts per session and separate intervention cooldowns. The original exported-file report remains available.
+`server/local-analysis.js` computes rolling statistics directly in Node every ten
+seconds. `server/pulse-checkin.js` evaluates sustained pulse changes against a
+personal baseline. `server/monitor.js` sends compact local statistics, Presage,
+and activity context to Gemini only for eligible check-in events. No external
+analytics installation or license is required. Session exports remain available.
 
 ## What we need from you
 
 - Supabase is configured locally as `https://oraqtqewohlgjkgzzssf.supabase.co` with DATA_PROVIDER=supabase. The migration and credentials were verified through a complete create/metric/end/read/summary check on September 12, 2026. The retained test session is labeled `Integration verification (synthetic data)` with source `demo`.
-- MATLAB R2026a analysis is verified. Teammates need their own activated MATLAB installation and local server configuration; secrets are not committed.
 - From the Presage owner: actual metric availability, units, validity signal, and sample cadence. Current ingestion rules are the starting agreement.
 - Assign the UI, Presage, and Gemini/ElevenLabs owners; share this document and the branch with them.
 
-Official references: [Node SQLite](https://nodejs.org/api/sqlite.html), [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [MATLAB JSON](https://www.mathworks.com/help/matlab/json-format.html).
+Official references: [Node SQLite](https://nodejs.org/api/sqlite.html), [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security).

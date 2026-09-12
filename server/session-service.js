@@ -26,7 +26,9 @@ export function sessionService(repository, now = Date.now) {
       const goal = text(body?.goal, 'goal');
       const source = body?.source ?? 'demo';
       if (!['demo', 'presage'].includes(source)) fail('source must be demo or presage.');
+      if(body?.demoScenario!==undefined&&(source!=='demo'||body.demoScenario!=='sustained_pulse'))fail('Invalid demo scenario.');
       const s = { schemaVersion: 1, id: randomUUID(), revision: 0, goal, source, status: 'active', startedAt: now(), endedAt: null, baseline: null, samples: [], interventions: [] };
+      if(body.demoScenario)s.demoScenario=body.demoScenario;
       await repository.insert(s); return s;
     },
     get,
@@ -35,6 +37,7 @@ export function sessionService(repository, now = Date.now) {
       const s = await change(id, s => {
         if (s.samples.length >= RULES.maxSamples) fail('Session reached 3600 samples. End it and start another.', 409);
         const sample = metric(input, s.source, s.startedAt, now(), s.samples.at(-1)?.timestamp);
+        sample.excludedFromAnalysis=Boolean(s.assistance?.breakStartedAt||now()<(s.assistance?.helpUntil??0));
         s.samples.push(sample);
         sample.state = deriveState(s, sample.timestamp).state;
       });

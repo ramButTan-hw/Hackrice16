@@ -28,9 +28,12 @@ export function supabaseRepository(url, key, fetcher = fetch) {
     const headers = { apikey: key, 'Content-Type': 'application/json', Prefer: 'return=representation' };
     // New secret keys use apikey only; legacy service-role JWTs also use Authorization.
     if (!key.startsWith('sb_secret_')) headers.Authorization = `Bearer ${key}`;
-    const response = await fetcher(base + query, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(10000) });
+    let response;
+    try { response = await fetcher(base + query, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(10000) }); }
+    catch { fail('Database connection interrupted or timed out. Check your connection and try again.', 503); }
     if (!response.ok) fail(`Database request failed (${response.status}). Check server configuration and migration.`, 502);
-    return response.json();
+    try { return await response.json(); }
+    catch { fail('Database returned an incomplete response. Try again shortly.', 502); }
   }
   return {
     kind: 'supabase',

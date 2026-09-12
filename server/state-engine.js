@@ -1,5 +1,5 @@
 import { RULES } from '../shared/contracts.js';
-export const usable = s => s.quality >= RULES.quality && s.heartRate !== null && s.breathingRate !== null;
+export const usable = s => !s.excludedFromAnalysis && s.quality >= RULES.quality && s.heartRate !== null && s.breathingRate !== null;
 export const mean = values => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
 
 // Descriptive prototype rules, not a clinical model or a productivity classifier.

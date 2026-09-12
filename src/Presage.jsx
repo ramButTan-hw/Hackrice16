@@ -2,23 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 const bridge = window.presage;
 async function post(id, endpoint, body) {
   const response = await fetch(`/api/sessions/${id}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await response.json();
+  const raw = await response.text();
+  let data; try { data = JSON.parse(raw); } catch { throw new Error('Monitoring server is restarting or unavailable.'); }
   if (!response.ok) throw new Error(data.error || 'Monitoring connection failed.');
   return data;
 }
-const labels = { limited_data: 'Reviewing available data; physiology is not reliable yet.', calibrating: 'Establishing a reliable baseline…', waiting_signal: 'Waiting for fresh readings…', analyzing_matlab: 'MATLAB is analyzing the latest window…', analyzing_gemini: 'Gemini is reviewing the combined signals…', watching: 'Watching for a useful moment to help', budget_reached: 'Analysis budget reached. Monitoring continues.', paused: 'Analysis paused', error: 'Analysis needs attention' };
+const labels = { limited_data: 'Reviewing available data; physiology is not reliable yet.', calibrating: 'Establishing a reliable baseline…', waiting_signal: 'Waiting for fresh readings…', analyzing_local: 'Locally analyzing the latest window…', analyzing_gemini: 'Gemini is reviewing the combined signals…', watching: 'Watching for a useful moment to help', budget_reached: 'Analysis budget reached. Monitoring continues.', paused: 'Analysis paused', error: 'Analysis needs attention' };
 export default function Presage({ sessionId, enabled, onSample, onRunning }) {
   const [running, setRunning] = useState(false), [starting, setStarting] = useState(false);
   const [voice, setVoice] = useState(false), [monitor, setMonitor] = useState(null);
   const [hint, setHint] = useState('Camera off. Monitoring starts with your session.');
   const [cameraInfo, setCameraInfo] = useState(null);
-  const [logError, setLogError] = useState('');
+  const [logError, setLogError] = useState(''), [connectionError, setConnectionError] = useState('');
   const video = useRef(null), stream = useRef(null), loop = useRef(null);
   const audio = useRef(null);
   const generation = useRef(0), pending = useRef(false), capturing = useRef(false);
   const handlers = useRef({ onSample, onRunning }); handlers.current = { onSample, onRunning };
   useEffect(() => { if (!voice || !running) audio.current?.pause(); }, [voice, running]);
-  useEffect(() => { setMonitor(null); }, [sessionId]);
+  useEffect(() => { setMonitor(null); setConnectionError(''); setLogError(''); }, [sessionId]);
   function release() {
     capturing.current = false; clearTimeout(loop.current);
     stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
@@ -81,6 +82,7 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
       if (['metrics', 'validation', 'error', 'processing', 'stopped'].includes(event.type) && queued < 10) {
         queued++;
         logQueue = logQueue.then(() => post(sessionId, 'events', { event: event.type, data: event.type === 'metrics' ? event.data : event }))
+          .then(() => { if (alive) setLogError(''); })
           .catch(error => { if (alive) setLogError('Log could not be saved: ' + error.message); })
           .finally(() => { queued--; });
       }
@@ -108,8 +110,8 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
         await post(sessionId, 'activity', { idleSeconds: await bridge.idle() });
         const response = await fetch(`/api/sessions/${sessionId}/monitor`);
         if (!response.ok) throw new Error('Could not read analysis status.');
-        const status = await response.json(); if (alive) setMonitor(status);
-      } catch (error) { if (alive) setHint(error.message); }
+        const status = await response.json(); if (alive) { setMonitor(status); setConnectionError(''); }
+      } catch (error) { if (alive) setConnectionError('Monitoring connection: ' + error.message + ' Retrying automatically.'); }
       finally { polling = false; }
     }
     void refresh(); const timer = setInterval(refresh, 1000);
@@ -134,14 +136,15 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     <div className="camera-actions">{running || starting
       ? <button type="button" onClick={() => { setHint('Camera and automatic analysis paused.'); void stop(); }}>Pause monitoring</button>
       : <button type="button" disabled={!bridge || !enabled} onClick={start}>Resume monitoring</button>}
-      <label><input type="checkbox" checked={voice} onChange={event => void toggleVoice(event.target.checked)}/> Speak suggestions</label></div>
+      <span>Check-ins open Gemini voice</span></div>
     {enabled && <div className="monitor-status">
       <p>{monitor?.error || labels[monitor?.status] || 'Preparing automatic analysis…'}</p>
       {monitor?.waitReason && <p>{monitor.waitReason}</p>}
+      {connectionError && <p role="alert">{connectionError}</p>}
       {logError && <p role="alert">{logError}</p>}
       <p>Open the Log tab for returned Presage values and analysis details.</p>
       <span>Gemini analyses: {monitor?.calls ?? 0} / {monitor?.budget ?? 6}</span>
-      {monitor?.matlab && <span> · MATLAB: {monitor.matlab.validSampleCount} reliable samples / last 60s</span>}
+      {monitor?.analysis && <span> · Local analysis: {monitor.analysis.validSampleCount} reliable samples / last 60s</span>}
       {decision && <p>{decision.delivered ? 'Suggestion delivered' : 'No interruption'} · {decision.reason}</p>}
       {monitor?.audio?.audio && <audio ref={audio} key={monitor.audio.interventionId} controls autoPlay={voice && running} src={monitor.audio.audio} aria-label="Companion suggestion"/>}
       {monitor?.audio?.audioError && <p>{monitor.audio.audioError}</p>}

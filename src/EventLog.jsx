@@ -22,7 +22,7 @@ export default function EventLog({ sessionId, visible }) {
   }, [sessionId, visible]);
   return <section hidden={!visible} className="event-log" aria-label="Pipeline log">
     <div className="camera-heading"><strong>Pipeline log</strong>{sessionId && <a href={`/api/sessions/${sessionId}/events?download=1`} download>Download JSON</a>}</div>
-    <p>Presage packets, validation codes, MATLAB results, Gemini requests and responses. Metric arrays show their latest two returned values and total count; no video is stored.</p>
+    <p>Presage packets, validation codes, local analysis results, Gemini requests and responses. Metric arrays show their latest two returned values and total count; no video is stored.</p>
     {error && <p role="alert">{error}</p>}
     {!sessionId ? <p>Start or open a session to view its log.</p> : !data?.events?.length ? <p>No events recorded yet. Resume monitoring after restarting the app.</p> : <>
       <small>Showing {data.events.length} of {data.totalEvents} events (latest {data.retainedLimit} retained).</small>
