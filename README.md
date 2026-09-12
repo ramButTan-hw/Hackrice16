@@ -1,5 +1,11 @@
 # Hackrice16
 
+The frontend is a minimal smoked-green glass session panel. Use the top-right
+collapse button to shrink Electron into a compact timer pill; expand restores the
+session view. Drag the empty header area to move the window. Pinning is optional and off
+by default. Session start/end and history use the existing backend; no camera
+readings or AI messages are fabricated. Active sessions restore on reopening.
+
 Database/state/analytics setup and teammate contracts: [Data handoff](docs/DATA_HANDOFF.md).
 Run `npm test` for backend checks and `npm run demo:data` for a complete simulated session export.
 
