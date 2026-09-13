@@ -1,3 +1,5 @@
+import {guideStep} from './guide.js';
+import {widgetService} from './widgets.js';
 import { plannerCalendar } from './planner-calendar.js';
 import { plannerService } from './planner.js';
 import {attentionSample} from './attention.js';
@@ -19,6 +21,7 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
   const app = express();
   const memory=memoryService();
   const google=googleAuth(googleAuthOptions),workspace=googleWorkspace({auth:google});
+  const widgets=widgetService(repository,now);
   const sessions = sessionService(repository, now);
   const planner = plannerService(repository, now, plannerCalendar({ auth: google, workspace }));
   const monitor = monitoringService({ sessions, now, ...monitorOptions });
@@ -30,6 +33,13 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
     const origin = request.get('origin');
     if (origin && origin !== `http://${request.get('host')}` && origin !== 'http://127.0.0.1:5173' && origin !== 'http://127.0.0.1:4173') return response.status(403).json({ error: 'Origin not allowed.' });
     next();
+  });
+  let guidePending=false;
+  app.post('/api/guide/step',async(req,res)=>{
+    if(guidePending)return res.status(429).json({error:'Guidance is already thinking.'});
+    guidePending=true;const controller=new AbortController();const cancel=()=>controller.abort();res.on('close',cancel);
+    try{res.set('Cache-Control','no-store').json(await guideStep(req.body,{signal:controller.signal}));}
+    finally{guidePending=false;res.removeListener('close',cancel);}
   });
   let imagePending=false;
   app.post('/api/images/generate',async(req,res)=>{
@@ -84,6 +94,8 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
     finally { chatPending = false; }
   });
   app.get('/api/analytics/patterns', async (req, res) => res.json(await planner.patterns(req.query.timeZone || 'UTC')));
+  app.get('/api/widgets/:kind',async(req,res)=>res.json(await widgets.get(req.params.kind)));
+  app.post('/api/widgets/:kind',async(req,res)=>res.json(await widgets.update(req.params.kind,req.body)));
   app.get('/api/plans', async (_req, res) => res.json(await planner.list()));
   app.post('/api/plans/suggest', async (req, res) => res.json(await planner.suggest(req.body || {})));
   app.post('/api/plans', async (req, res) => res.status(201).json(await planner.create(req.body)));

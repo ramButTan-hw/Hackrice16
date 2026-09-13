@@ -1,0 +1,6 @@
+export function isFirstPlaylistRequest(text){
+ if(typeof text!=='string')return false;
+ const value=text.trim().replace(/^(?:hey\s+)?jarvis[,! ]*/i,'').replace(/you\s+tube/gi,'youtube').replace(/[,!?]/g,' ').replace(/\.+$/,'').replace(/\s+/g,' ').trim();
+ return /^(?:(?:can|could|would|will) you )?(?:please )?(?:(?:open(?: up)?|launch|bring up) youtube music (?:and(?: then)?|then) )?(?:play|start playing) my (?:first|1st) playlist(?: (?:on|in|using) youtube music)?(?: (?:for me|please))?$/.test(value.toLowerCase())&&/youtube music/i.test(value);
+}
+export const FIRST_PLAYLIST_GOAL='On YouTube Music in the user’s signed-in browser, open Library, then Playlists, and play the first user-created or saved playlist shown in the current display order. Do not substitute a home-page recommendation, radio, mix, or Liked Music. Open that playlist and press its Play control. If not signed in, pause for the user to sign in. If the library has no playlists or the first playlist is empty or unavailable, explain that and stop. Do not subscribe, purchase, create, delete, or modify playlists. Do not play a different playlist as a fallback. Once the player visibly shows playback active (a Pause control and a track title), return done and stop interacting. Do not claim actual audio output was verified from a screenshot.';

@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('helpBridge',{
   notify:checkin=>ipcRenderer.invoke('help:notify',checkin),
+  playFirstPlaylist:voice=>ipcRenderer.invoke('music:play-first',voice),
+  openApp:name=>ipcRenderer.invoke('app:open',name),
   openWebsite:url=>ipcRenderer.invoke('browser:open',url),
   openGoogle:url=>ipcRenderer.invoke('google:open',url),
   snapshot:()=>ipcRenderer.invoke('help:snapshot'),
@@ -15,6 +17,8 @@ contextBridge.exposeInMainWorld('helpBridge',{
 });
 contextBridge.exposeInMainWorld('companionWindow', {
   setSession:id=>ipcRenderer.invoke('window:session',id),
+  guide:(goal,voice=false)=>ipcRenderer.invoke('guide:open',goal,voice),
+  widget:kind=>ipcRenderer.invoke('window:widget',kind),
   planner:()=>ipcRenderer.invoke('window:planner'),
   appearance:()=>ipcRenderer.invoke('window:appearance'),
   setCompact: value => ipcRenderer.invoke('window:compact', value),

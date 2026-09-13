@@ -9,8 +9,8 @@ export function websiteRequest(text) {
   const value = String(text).trim().replace(/^(?:hey\s+)?jarvis[,! ]*/i, '').replace(/[.!?]+$/, '').trim();
   const match = value.match(/^(?:(?:please|can you|could you|would you|will you)\s+)?(?:open|launch|visit|go to|take me to|bring up)\s+(.+?)(?:\s+(?:please|for me|in (?:my |the )?browser))?$/i);
   if (!match) return null;
-  let address = match[1].replace(/\s+dot\s+/gi, '.');
-  const names = { roblox: 'roblox.com', youtube: 'youtube.com', google: 'google.com', github: 'github.com' };
+  let address = match[1].replace(/^(?:the )?(.+?) (?:website|site)$/i,'$1').replace(/\s+dot\s+/gi, '.');
+  const names = { roblox: 'roblox.com', youtube: 'youtube.com', 'youtube music': 'music.youtube.com', google: 'google.com', github: 'github.com', 'google docs': 'docs.google.com', 'google drive': 'drive.google.com', 'google calendar': 'calendar.google.com', gmail: 'mail.google.com' };
   address = names[address.toLowerCase()] ?? address;
   try { return websiteUrl(address); } catch { return null; }
 }

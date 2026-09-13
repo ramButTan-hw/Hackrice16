@@ -4,7 +4,7 @@ export async function openGoogle(url){
   if(open)return open(url);
   window.open(url,'_blank','noopener,noreferrer');
 }
-export default function GoogleActions({proposals,busy,connected,onConfirm,onCancel,onConnect,onIllustrate,onOpen}){
+export default function GoogleActions({proposals,busy,connected,connecting=false,onConfirm,onCancel,onConnect,onIllustrate,onOpen}){
   const [linkError,setLinkError]=useState(null);
   async function openResult(proposal) {
     setLinkError(null);
@@ -24,8 +24,8 @@ export default function GoogleActions({proposals,busy,connected,onConfirm,onCanc
     {p.previousStart&&<small>Previously: {new Date(p.previousStart).toLocaleString(undefined,{timeZone:p.timeZone})}</small>}
     {p.description&&<p>{p.description}</p>}
     {p.error&&<p role="alert">{p.error}</p>}
-    {p.result?.url&&<button type="button" onClick={()=>void openResult(p)}>Open in Google ↗</button>}
+    {p.result?.url&&<><button type="button" onClick={()=>void openResult(p)}>Open in Google ↗</button><p className="google-preview-hint">Say “open in Google” to open your latest saved item.</p></>}
     {linkError?.id===p.id&&<div role="alert"><p>{linkError.message}</p><label>Google link<input className="google-link-fallback" readOnly value={p.result.url} onFocus={e=>e.target.select()}/></label></div>}
-    {p.status==='preview'&&<><p className="google-preview-hint">Review this preview. Say “confirm” for the first action, or ask for changes.</p><div className="google-action-buttons">{connected?<button type="button" disabled={busy} onClick={()=>onConfirm(p)}>Confirm</button>:<button type="button" disabled={busy} onClick={onConnect}>Connect Google to save</button>}<button type="button" disabled={busy} onClick={()=>onCancel(p)}>Cancel</button></div></>}
+    {p.status==='preview'&&<><p className="google-preview-hint">{connected?'Review this preview. Say “confirm” to save the first action, or ask for changes.':connecting?'Finish Google sign-in in your browser, then say “confirm” to save.': 'Google isn’t connected. Say “confirm” or use the button below to open sign-in. Your preview will stay here.'}</p><div className="google-action-buttons">{connected?<button type="button" disabled={busy} onClick={()=>onConfirm(p)}>Confirm</button>:<button type="button" disabled={busy} onClick={onConnect}>Connect Google to save</button>}<button type="button" disabled={busy} onClick={()=>onCancel(p)}>Cancel</button></div></>}
   </article>)}</div>;
 }

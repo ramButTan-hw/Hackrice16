@@ -4,6 +4,11 @@ const path = require('node:path');
 const {openGoogleLink}=require('./google-links.cjs');
 const {attachEdgeSnap}=require('./window-layout.cjs');
 const expandedSizes=new WeakMap();
+const launchApp=require('./app-launcher.cjs').createAppLauncher({home:app.getPath('home')});
+async function launchTarget(step){
+ if(step.action==='open_app')return launchApp(step.name);
+ const {websiteUrl}=await import('../shared/website-request.js');const url=websiteUrl(step.url);await shell.openExternal(url,{activate:true});return {name:new URL(url).hostname};
+}
 const { existsSync } = require('node:fs');
 // Source launches must not depend on the terminal/Finder working directory.
 if (!app.isPackaged) process.chdir(path.join(__dirname, '..'));
@@ -16,6 +21,7 @@ let helpSession=null;
 const development = process.argv.includes('--dev');
 let server;
 let backend;
+let guide;
 let appUrl;
 let mainWindow=null,lastSession=null,closing=null,shutdownComplete=false;
 if(process.platform==='win32')app.setAppUserModelId(app.isPackaged?'com.jarvis.companion':process.execPath);
@@ -25,7 +31,7 @@ function closeApplication(){
   if(closing)return closing;
   const id=lastSession;
   mainWindow?.setEnabled(false);
-  closeHelpPanel();help.stop();
+  guide?.stop();closeHelpPanel();help.stop();
   closing=(async()=>{
     await finishSessionAndStop(development?'http://127.0.0.1:3001':appUrl,id,{stop:()=>presage.stop()});
     await backend?.locals.close();
@@ -76,7 +82,7 @@ function createWindow() {
   });
   window.loadURL(appUrl);
   globalShortcut.register('CommandOrControl+Shift+Space',()=>{if(helpSession&&!window.isDestroyed()){window.show();window.webContents.send('help:event',{wake:true});}});
-  window.on('closed',()=>{plannerWindow?.destroy();appearanceWindow?.destroy();closeHelpPanel();help.stop();helpSession=null;globalShortcut.unregisterAll();});
+  window.on('closed',()=>{for(const panel of widgetWindows.values())panel.destroy();plannerWindow?.destroy();appearanceWindow?.destroy();closeHelpPanel();help.stop();helpSession=null;globalShortcut.unregisterAll();});
   window.webContents.on('did-start-loading',()=>{help.stop();helpSession=null;});
   window.on('closed', () => { void presage.stop().catch(console.error); });
   window.webContents.on('render-process-gone', () => { help.stop();helpSession=null;void presage.stop().catch(console.error); });
@@ -116,6 +122,19 @@ function trustedWindow(event) {
     || new URL(event.senderFrame.url).origin !== new URL(appUrl).origin) throw new Error('Untrusted window');
   return window;
 }
+const widgetWindows=new Map();
+ipcMain.handle('window:widget',async(event,kind)=>{
+  const owner=trustedWindow(event);
+  if((owner!==mainWindow&&owner!==helpPanel)||!['timer','checklist'].includes(kind))throw new Error('Invalid widget request.');
+  const existing=widgetWindows.get(kind);
+  if(existing&&!existing.isDestroyed()){if(existing.isMinimized())existing.restore();existing.show();existing.focus();return;}
+  const area=screen.getDisplayMatching(owner.getBounds()).workArea;
+  const panel=new BrowserWindow({width:Math.min(kind==='timer'?320:380,area.width),height:Math.min(kind==='timer'?290:540,area.height),minWidth:280,minHeight:kind==='timer'?260:300,frame:false,transparent:true,hasShadow:false,resizable:true,alwaysOnTop:true,maximizable:false,fullscreenable:false,title:'Jarvis '+kind,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,backgroundThrottling:false,preload:path.join(__dirname,'widget-preload.cjs')}});
+  widgetWindows.set(kind,panel);attachEdgeSnap(panel,screen);
+  panel.webContents.setWindowOpenHandler(()=>({action:'deny'}));panel.webContents.on('will-navigate',e=>e.preventDefault());
+  panel.on('closed',()=>widgetWindows.delete(kind));
+  await panel.loadURL(appUrl+'/?widget='+kind);
+});
 let plannerWindow=null;
 ipcMain.handle('window:planner', event => {
   const owner = trustedWindow(event);
@@ -202,6 +221,10 @@ ipcMain.handle('help:snapshot',async event=>{
   if(owner!==helpPanel)activeHelp(event);
   return captureScreen();
 });
+ipcMain.handle('app:open',async(event,name)=>{
+ const owner=trustedWindow(event);if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can open apps.');
+ return launchApp(name);
+});
 ipcMain.handle('browser:open',async(event,value)=>{
   const owner=trustedWindow(event);
   if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can open websites.');
@@ -217,6 +240,7 @@ ipcMain.handle('google:open',async(event,value)=>{
 ipcMain.handle('help:reveal',event=>{const window=activeHelp(event);window.show();window.flashFrame(true);});
 
 app.whenReady().then(async () => {
+  guide=require('./guide.cjs').createGuide({app,BrowserWindow,ipcMain,screen,desktopCapturer,globalShortcut,systemPreferences,shell,permissions,launchTarget,apiUrl:()=>development?'http://127.0.0.1:3001':appUrl,authorize:event=>{const owner=trustedWindow(event);if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can start guidance.');}});
   if (development) {
     appUrl = 'http://127.0.0.1:5173';
   } else {
@@ -230,6 +254,21 @@ app.whenReady().then(async () => {
   }
   installMediaPermissions(session.defaultSession,{origin:new URL(appUrl).origin,permissions,allowedContents:contents=>contents===mainWindow?.webContents||contents===helpPanel?.webContents});
   createWindow();
+  let timerCheckPending=false,lastTimerAlert=null;
+  const timerWatch=setInterval(async()=>{
+    if(timerCheckPending||closing||shutdownComplete)return;
+    timerCheckPending=true;
+    try{
+      const response=await fetch((development?'http://127.0.0.1:3001':appUrl)+'/api/widgets/timer');
+      if(!response.ok)return;const timer=await response.json();
+      if(timer.status==='completed'&&timer.endsAt&&timer.endsAt!==lastTimerAlert){
+        lastTimerAlert=timer.endsAt;
+        if(Notification.isSupported())new Notification({title:'Jarvis · Timer complete',body:timer.title+' is finished. Take a moment before your next task.'}).show();
+        shell.beep();widgetWindows.get('timer')?.flashFrame(true);
+      }
+    }catch{}finally{timerCheckPending=false;}
+  },2000);
+  app.once('will-quit',()=>clearInterval(timerWatch));
   powerMonitor.on('suspend', () => { help.stop();void presage.stop().catch(console.error); });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

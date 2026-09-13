@@ -1,3 +1,9 @@
+import * as musicRequest from '../shared/music-request.js';
+import {googleOpenRequest,savedGoogleResult} from './google-open-request.js';
+import {prepareGoogleConfirmation} from './google-confirmation.js';
+import {appRequest} from '../shared/app-request.js';
+import {guideRequest,openGuide} from './guide-request.js';
+import {widgetRequest,openWidget} from './widget-request.js';
 import {websiteRequest,openWebsite} from './website-request.js';
 import {isPlannerRequest,openPlanner} from './planner-request.js';
 import {isBreakRequest,endForBreak,BREAK_REPLY} from './break-request.js';
@@ -24,12 +30,45 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
   async function send(text=draft,captureOnce=false){
     text=text.trim();if(busy.current)return;if(!text){stopRecording();return;}
     if(recording.current){const resume=follow.current;stopRecording();follow.current=resume;}
+    if(musicRequest.isFirstPlaylistRequest(text)){
+      const voice=follow.current;stopRecording();busy.current=true;setPhase('thinking');setError('');const token=generation.current;
+      try{
+        const play=window.helpPanel?.playFirstPlaylist??window.helpBridge?.playFirstPlaylist;
+        if(!play)throw new Error('Restart the Jarvis desktop app to enable playlist playback.');
+        const result=await play(voice);if(token!==generation.current)return;
+        setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:result.started?'I opened YouTube Music. The guide is finding your first playlist and starting it; it will pause if sign-in or your help is needed.':'Playlist startup was stopped.'}]);
+      }catch(e){if(token===generation.current){setError(e.message);setDraft(text);}}
+      finally{if(token===generation.current){busy.current=false;setPhase('idle');}}
+      return;
+    }
+    if(googleOpenRequest(text)){
+      const saved=savedGoogleResult(proposals);stopRecording();busy.current=true;setError('');const token=generation.current;
+      try{
+        if(!saved)throw new Error(proposals.some(p=>p.status==='preview')?'This is still a preview. Say “confirm” to save it before opening in Google.':'There isn’t a saved Google item in this conversation to open yet.');
+        await openGoogle(saved.result.url);if(token!==generation.current)return;
+        setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:`Opened “${saved.title}” in Google.`}]);
+      }catch(e){if(token===generation.current){setError(e.message);setDraft(text);}}
+      finally{if(token===generation.current){busy.current=false;setPhase('idle');}}
+      return;
+    }
     const pending=proposals.find(p=>p.status==='preview');
     if(pending&&/^(yes|confirm|confirm it|yes please|save it|create it|do it|approve)[.! ]*$/i.test(text)){await performGoogle(pending,'confirm');return;}
     if(pending?.kind.endsWith('_slides')&&/^(generate|add|create)( the)? (images|illustrations)[.! ]*$/i.test(text)){await performGoogle(pending,'illustrate');return;}
     if(pending&&/^(cancel|cancel it|cancel that|no|no thanks)[.! ]*$/i.test(text)){await performGoogle(pending,'cancel');return;}
+    const guide=guideRequest(text);if(guide){
+      const voice=follow.current;stopRecording();setError('');
+      try{await openGuide(guide.goal,voice);setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:'Screen guidance is open. Review each step before letting Jarvis act.'}]);}catch(e){setError(e.message);}
+      return;
+    }
+    const widget=widgetRequest(text);if(widget){await showWidget(text,widget);return;}
     const website=websiteRequest(text);if(website){await showWebsite(text,website);return;}
     if(isPlannerRequest(text)){await showPlanner(text);return;}
+    const app=appRequest(text);if(app){
+      stopRecording();busy.current=true;setError('');
+      try{const launch=window.helpPanel?.openApp??window.helpBridge?.openApp;if(!launch)throw new Error('Restart the Jarvis desktop app to open installed apps.');const result=await launch(app);setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:`Opened ${result.name}.`}]);}
+      catch(e){setError(e.message);setDraft(text);}finally{busy.current=false;setPhase('idle');}
+      return;
+    }
     if(isBreakRequest(text)){await takeBreak(text);return;}
     if(isDismissal(text)){stopRecording();onAction('close');return;}
     busy.current=true;setPhase('thinking');setError('');const token=generation.current;
@@ -65,11 +104,24 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
         }
         if(token!==generation.current)return;
         for(const old of proposals.filter(p=>p.status==='preview'))void fetch('/api/google/actions/'+old.id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current})}).catch(()=>{});setProposals(result.proposals);}
+      if(result.launch){
+        stopRecording();let name;
+        if(result.launch.kind==='website'){await openWebsite(result.launch.target);name=new URL(result.launch.target).hostname;}
+        else{const launch=window.helpPanel?.openApp??window.helpBridge?.openApp;if(!launch)throw new Error('Restart Jarvis to open installed apps.');name=(await launch(result.launch.target)).name;}
+        if(token!==generation.current)return;setMessages([...base,{role:'model',text:`Opened ${name}.`}]);
+      }
+      if(result.widget){stopRecording();await openWidget({...result.widget,autoStart:true});if(token!==generation.current)return;setMessages([...base,{role:'model',text:`Your ${result.widget.kind} is open${result.widget.action?' and saved':''}.`}]);}
       if(result.uiAction==='open_planner'){stopRecording();await openPlanner();if(token!==generation.current)return;setMessages([...base,{role:'model',text:'Your planner is open.'}]);}
       if(result.action==='break_start'){await endForBreak(sessionId);if(token!==generation.current)return;setMessages([...base,{role:'model',text:BREAK_REPLY}]);onAction('break_start');}
       if(result.action==='close'){follow.current=false;onAction('close');}
     }catch(e){if(token===generation.current){follow.current=false;setMessages(messages);setDraft(user.text);setError(e.name==='AbortError'?'Reply timed out. Your message is ready to retry.':e.message);}}
     finally{clearTimeout(timeout);if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current){timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);}else onAction('idle');}}
+  }
+  async function showWidget(text,widget){
+    stopRecording();busy.current=true;setError('');const token=generation.current;
+    try{await openWidget({...widget,autoStart:true});if(token!==generation.current)return;setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:`Your ${widget.kind} is open${widget.action?' and saved':''}.`}]);}
+    catch(e){if(token===generation.current){setError(e.message);setDraft(text);}}
+    finally{if(token===generation.current){busy.current=false;setPhase('idle');}}
   }
   async function showWebsite(text,url) {
     stopRecording();busy.current=true;setError('');const token=generation.current;
@@ -123,7 +175,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
   async function refreshGoogle(){try{setGoogle(await fetch('/api/google/status').then(jsonResponse));}catch{}}
   useEffect(()=>{const refresh=()=>void refreshGoogle();window.addEventListener('focus',refresh);return()=>window.removeEventListener('focus',refresh);},[]);
   useEffect(()=>{if(!connecting)return;const timer=setInterval(()=>void refreshGoogle(),2000);const timeout=setTimeout(()=>setConnecting(false),120000);return()=>{clearInterval(timer);clearTimeout(timeout);};},[connecting]);
-  useEffect(()=>{if(google.connected)setConnecting(false);},[google.connected]);
+  useEffect(()=>{if(google.connected&&connecting){setConnecting(false);setMessages(list=>[...list,{role:'model',text:'Google is connected. Review your preview, then say “confirm” to save it.'}]);}},[google.connected,connecting]);
   async function connectGoogle(){stopRecording();try{const data=await fetch('/api/google/connect',{method:'POST'}).then(jsonResponse);await openGoogle(data.url);setConnecting(true);}catch(e){setError(e.message);}}
   async function disconnectGoogle(){stopRecording();try{await fetch('/api/google/disconnect',{method:'POST'}).then(jsonResponse);await refreshGoogle();}catch(e){setError(e.message);}}
   async function attachImage(message,selection){
@@ -135,7 +187,17 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
   }
   async function performGoogle(proposal,operation){
     if(busy.current)return;const resume=follow.current;stopRecording();busy.current=true;setPhase('thinking');setError('');const token=generation.current;
-    try{const result=await fetch('/api/google/actions/'+proposal.id+'/'+operation,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current,sessionId,memory:remember})}).then(jsonResponse);
+    try{
+      if(operation==='confirm'){
+        const connection=await prepareGoogleConfirmation({open:openGoogle,connecting,onStatus:setGoogle});
+        if(token!==generation.current)return;
+        if(!connection.ready){
+          setConnecting(true);setDraft('');follow.current=false;
+          setMessages(list=>[...list,{role:'user',text:'Confirm this preview.'},{role:'model',text:connection.opened?'Google isn’t connected yet. I opened sign-in in your browser. Your preview is kept here; finish connecting, then say “confirm” to save.':'Finish Google sign-in in your browser, then say “confirm” again. Your preview is still here.'}]);
+          return;
+        }
+      }
+      const result=await fetch('/api/google/actions/'+proposal.id+'/'+operation,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current,sessionId,memory:remember})}).then(jsonResponse);
       if(token!==generation.current)return;setProposals(list=>list.map(p=>p.id===proposal.id?result:p));
       const text=operation==='illustrate'?'Illustrations are ready. Review the slide previews, then confirm to save.':result.status==='done'?'Saved in Google: '+result.title:result.status==='cancelled'?'Cancelled. Nothing was saved.':result.error||'Check Google for the result.';
       setMessages(list=>[...list,{role:'user',text:operation==='illustrate'?'Generate illustrations.':operation==='confirm'?'Confirm this preview.':'Cancel this preview.'},{role:'model',text}]);
@@ -148,8 +210,8 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
     <div ref={log} className="voice-transcript" role="log" aria-live="polite">
       {initialText&&<div className="ai-message model"><span className="ai-message-label">CHECK-IN</span><p>{initialText}</p></div>}
       {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">JARVIS</span>}<p>{m.text||'Thinking…'}</p>{m.image&&<figure className="generated-image"><img src={m.image} alt={m.imagePrompt||'AI-generated image'}/><figcaption>AI-generated · <a href={m.image} download={'jarvis-image-'+i+(m.image.startsWith('data:image/jpeg')?'.jpg':'.png')}>Download image</a></figcaption>{proposals.some(p=>p.status==='preview'&&p.slides)&&<select aria-label="Add generated image to slide" value="" disabled={busy.current} onChange={e=>void attachImage(m,e.target.value)}><option value="">Add to a slide…</option>{proposals.filter(p=>p.status==='preview'&&p.slides).flatMap(p=>p.slides.map((slide,n)=><option key={p.id+':'+n} value={p.id+':'+n}>{p.title} · Slide {n+1}: {slide.title}</option>))}</select>}</figure>}</div>)}
-      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>What can we work on?</h2><p>Ask aloud or type below.<br/>I can help with what’s on your screen.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Give me a concise summary of my screen.',true)}>Summarize screen</button><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Make a checklist</button></div></div>}
-      <GoogleActions onOpen={openGoogleResult} proposals={proposals} busy={busy.current} connected={google.connected} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
+      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>What can we work on?</h2><p>Ask aloud or type below.<br/>I can help with what’s on your screen.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Give me a concise summary of my screen.',true)}>Summarize screen</button><button type="button" onClick={()=>void send('Guide me')}>Guide me</button><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Make a checklist</button></div></div>}
+      <GoogleActions onOpen={openGoogleResult} proposals={proposals} busy={busy.current} connected={google.connected} connecting={connecting} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
     </div>
     {error&&<p className="voice-error" role="alert">{error}</p>}
     <div className="ai-status" role="status"><div className={'assistant-orb '+(phase==='recording'?'listening':'')} aria-hidden="true"><i/><i/><i/><i/><i/></div><span>{status}</span><small>{phase==='recording'?'Pause to send':phase==='idle'?'Say “hey Jarvis”':''}</small></div>

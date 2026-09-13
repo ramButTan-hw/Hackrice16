@@ -1,3 +1,5 @@
+import WidgetWindow from './WidgetWindow.jsx';
+import {openWidget} from './widget-request.js';
 import SessionAnalytics from './SessionAnalytics.jsx';
 import Planner from './Planner.jsx';
 import React, { useEffect, useRef, useState } from 'react';
@@ -203,6 +205,7 @@ function App() {
               <div hidden={tab !== 'session'}>
                 {session?.status === 'ended' && <SessionAnalytics key={session.id} session={session} api={api} onPlan={openPlanner}/>}
                 {!active&&<div className="session-intro"><span className="eyebrow">{session?'A FRESH START':'YOUR WORK COMPANION'}</span><h1>One thing at a time.</h1><p>Pick a task. I’ll be here if you need a hand.</p></div>}
+                {<div className="widget-launchers"><button onClick={()=>void openWidget({kind:'timer'}).catch(e=>setError(e.message))}>◷ Timer</button><button onClick={()=>void openWidget({kind:'checklist'}).catch(e=>setError(e.message))}>☑ Checklist</button></div>}
                 <form className={'session-card '+(!active?'session-idle':'')} onSubmit={start}>
                   <label className="eyebrow" htmlFor="intention">WORKING ON</label>
                   <input id="intention" placeholder="e.g. Review lecture notes" value={goal} onChange={event => setGoal(event.target.value)} maxLength={200} disabled={active || busy} required autoComplete="off"/>
@@ -246,6 +249,6 @@ function PlannerWindow() {
     <div className="content planner-window"><Planner api={api}/></div>
   </main></div>;
 }
-createRoot(document.getElementById('root')).render(<React.StrictMode>{new URLSearchParams(location.search).has('planner-window')?<PlannerWindow/>:new URLSearchParams(location.search).has('appearance-window')?<AppearanceWindow/>:new URLSearchParams(location.search).has('help-window')?<HelpWindow/>:<App/>}</React.StrictMode>);
+createRoot(document.getElementById('root')).render(<React.StrictMode>{['timer','checklist'].includes(new URLSearchParams(location.search).get('widget'))?<WidgetWindow kind={new URLSearchParams(location.search).get('widget')}/>:new URLSearchParams(location.search).has('planner-window')?<PlannerWindow/>:new URLSearchParams(location.search).has('appearance-window')?<AppearanceWindow/>:new URLSearchParams(location.search).has('help-window')?<HelpWindow/>:<App/>}</React.StrictMode>);
 
 

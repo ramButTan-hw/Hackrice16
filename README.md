@@ -80,3 +80,50 @@ SQLite creates the planner table automatically. Supabase deployments must apply 
 Jarvis can open a website in your default browser from typed or transcribed commands such as “hey Jarvis can you open roblox.com”, “visit github.com”, or “open roblox dot com”. This is a local action and does not require Gemini. Only HTTP/HTTPS addresses are accepted; opening a website does not interact with or sign in to it. Restart Electron after updating to enable the new browser control.
 
 The planner window now centers on a month calendar with previous/next month navigation, Today, selectable days, saved-block markers, and a daily agenda. The side panel finds times for the selected day; signal patterns and connection details are collapsible. The calendar displays Jarvis plans, while Google busy times are used for availability checks when connected.
+
+
+## Timer and checklist widgets
+
+Use the Timer and Checklist buttons on the Session tab, or ask Jarvis in chat/voice:
+
+- “Start a 25-minute timer” / “start a pomodoro”
+- “Pause my timer” / “resume the timer” / “reset the timer”
+- “Open my checklist”
+- “Make a checklist: read notes, practice questions, review mistakes”
+- “Make a checklist to prepare for my biology exam” (Gemini generates the steps)
+
+Each widget opens in a separate floating glass window with keep-on-top. The compact timer follows the app theme; the checklist also has theme controls. One saved timer and one checklist are shared across Jarvis windows. Checklists append generated items instead of replacing existing work. Asking Jarvis to open a timer starts it immediately (25 minutes by default), resumes a paused timer, or preserves an already running countdown. The compact window offers custom durations of 1–240 minutes when idle, pause/resume/reset, a 5-minute break after completion, and completion alerts. Breaks start explicitly and do not change the work session or biometric monitoring. Timer deadlines survive closing the widget and restarting Jarvis; alerts require the app to be running (an overdue timer is recognized on restart). Closing a widget preserves its state.
+
+SQLite creates widget storage automatically. Supabase users must apply `supabase/migrations/003_widget_records.sql`. Restart Electron after updating to load widget controls.
+
+## Screen guidance and supervised input
+
+In Chat, choose **Guide me**, or say “Jarvis, guide me through finding my assignment.” Review the task in the separate guide window and click **Show next step**. Each requested step shares a fresh screenshot of the display where guidance opened with the configured Gemini model. These screenshots are not saved to the database or memory. Jarvis temporarily hides its other windows so they do not cover the task, and restores them when guidance stops.
+
+A visible cursor ring marks the suggested control. Follow the instruction yourself and choose **I did it · Next**, or approve **Do this step** to perform exactly one click, short text insertion, or scroll. Text is shown verbatim before approval and is inserted at the clicked field's caret (it does not clear existing text). By default, **Check result · Next** reads the screen again. Explicit **Do it for me** mode can perform up to eight steps with fresh screen checks. Sensitive steps and final submissions are handed back to the user. Screenshot interpretation can be imperfect: inspect the highlighted target before approving.
+
+**Stop** or **Escape** dismisses the guide and cancels pending work. Approvals are single use, expire after 30 seconds from screen capture, and are rejected if the target pixels, display geometry, or active app change. A step that fails must be refreshed before another approval. The overlay works without input permissions; supervised input currently requires macOS Accessibility permission for Jarvis/Electron. Use **Enable macOS Accessibility** in the guide, return to the target app, then request a fresh step. Ordinary text fields are verified through Accessibility; secure fields and terminal/System Settings input are refused.
+
+Source launches compile the bundled Swift input helper on first use into the app's user-data directory. Apple Command Line Tools are required (`xcode-select --install`); if they are unavailable, manual guidance remains available. Restart Electron after updating. Screen guidance uses `GEMINI_API_KEY` and `GEMINI_MODEL`, like chat.
+
+### Voice in the guide
+
+Click **Voice on** once in the guide, or open guidance by speaking to Jarvis to carry voice into the guide automatically. With microphone access and `ELEVENLABS_API_KEY` configured, the guide continues listening between commands even while you use another app. Say **“let’s start”** to begin the entered task and **“I did it”**, **“next step”**, or **“continue”** to capture the screen and suggest the next step. If you have not entered a task, say **“my task is …”** first. **“Pause listening”** turns off the microphone; **“stop the guide”** closes guidance. Stop / Escape remains immediate while speech is being transcribed.
+
+Silence is not uploaded. Spoken utterances are sent to the existing ElevenLabs transcription service, so voice commands take a moment to process. Late transcripts from an earlier step are discarded. “Do this step” approves one displayed action and checks the result. “Do it for me” enables bounded takeover. Other voice commands do not approve input.
+
+### Opening websites and Mac apps
+
+Chat and guide voice both understand **“open Google”** (the website), **“open Google Docs”**, **“open Safari”**, **“open Chrome”**, and **“open Spotify”**. App launching resolves installed `.app` bundles in `/Applications`, `/System/Applications`, their immediate subfolders, and `~/Applications`, with a Finder shortcut. Missing apps produce a specific error. Names are passed as literal launch arguments, never shell commands.
+
+A direct spoken request to open a target launches it immediately. If the guide proposes opening a website or app as its next step, review it and click **Do this step**. Opening a target does not require Accessibility permission. Guidance retains the original task and up to four recent suggestions, then checks a fresh screenshot before deciding what comes next. It is instructed to navigate to the relevant service and perform the task, rather than search for how-to instructions unless requested.
+
+### Do it for me
+
+After starting guidance, click **Do it for me** or say the same phrase with voice enabled. Jarvis previews each action for one second, performs it, and takes a fresh screenshot before choosing another step. It pauses at manual/sensitive steps, permission or action errors, repeated suggestions, or after eight actions. **Stop / Escape** cancels pending work; voice remains available for **“stop the guide”** while takeover runs. Already dispatched input cannot be undone by Stop. Say **“do this step”** to perform just the displayed action and inspect the result. macOS Accessibility permission is needed for clicks, typing, and scrolling.
+
+Guide voice also accepts free-form answers, corrections, and questions. For example, after a clarification question, say “the second option” or “I want to add a README.” The guide sends the recent question/reply context (up to six entries) with a fresh screenshot, and displays the recognized reply. These replies request a new suggestion; they do not implicitly approve an action or start takeover. Say “my task is …” to replace an active task without reopening the guide. During active takeover, stop the guide before changing direction.
+
+### YouTube Music first playlist
+
+Say **“Hey Jarvis, open YouTube Music and play my first playlist.”** Jarvis opens YouTube Music in your normal browser and starts its bounded guide takeover automatically. It selects the first saved/user playlist displayed in Library → Playlists and starts playback; it pauses for sign-in, unavailable playlists, or unclear progress. Your browser's existing account is used, without copying cookies into Jarvis. Accessibility and screen access are required for the guide. The browser is brought forward during selection; playback can continue in the background afterward. This is screen-guided playback, not a background browser extension or an official YouTube Music API integration. Actual audio output is not verified by screenshots. Stop/Escape cancels guide input; use the music player's Pause control to stop audio already playing.
