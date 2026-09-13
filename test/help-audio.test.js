@@ -25,3 +25,47 @@ test('wake-to-live handoff reuses capture and keeps forwarding later voice frame
   microphone.context.state='suspended';microphone.context.onstatechange();assert.equal(resumes,2);
   microphone.close();assert.equal(stops,1);assert.equal(node.port.onmessage,null);
 });
+
+function microphoneFixture(t,{close,setupError,disconnectThrows=false}={}){
+  const keys=['AudioContext','AudioWorkletNode','navigator','devicePermissions'];
+  const original=Object.fromEntries(keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
+  t.after(()=>{for(const [key,descriptor]of Object.entries(original)){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
+  const stats={closes:0,stops:0,disconnects:0};
+  const connection=()=>({connect(){},disconnect(){stats.disconnects++;if(disconnectThrows)throw new Error('already disconnected');}});
+  const track={stop(){stats.stops++;}};
+  class Context{
+    sampleRate=16000;state='running';audioWorklet={addModule:async()=>{if(setupError)throw setupError;}};
+    resume(){return Promise.resolve();}
+    close(){stats.closes++;return close?close(this):Promise.resolve();}
+    createMediaStreamSource(){return connection();}
+    createGain(){return {...connection(),gain:{value:1}};}
+  }
+  class Worklet{constructor(){Object.assign(this,connection());this.port={};stats.node=this;}}
+  const values={AudioContext:Context,AudioWorkletNode:Worklet,devicePermissions:undefined,navigator:{mediaDevices:{getUserMedia:async()=>({getTracks:()=>[track],getAudioTracks:()=>[track]})}}};
+  for(const [key,value]of Object.entries(values))Object.defineProperty(globalThis,key,{configurable:true,value});
+  return stats;
+}
+test('repeated microphone cleanup shares shutdown and releases capture only once',async t=>{
+  let finish;
+  const stats=microphoneFixture(t,{close:()=>new Promise(resolve=>{finish=resolve;})});
+  const mic=await openMicrophone(()=>{});
+  const first=mic.close(),second=mic.close();
+  assert.equal(first,second);assert.equal(stats.closes,1);assert.equal(stats.stops,1);assert.equal(stats.disconnects,3);
+  assert.equal(stats.node.port.onmessage,null);finish();await first;await mic.close();assert.equal(stats.closes,1);
+});
+test('already closed context is not closed again and disconnect errors do not leave capture running',async t=>{
+  const stats=microphoneFixture(t,{disconnectThrows:true});const mic=await openMicrophone(()=>{});
+  mic.context.state='closed';await mic.close();
+  assert.equal(stats.closes,0);assert.equal(stats.stops,1);assert.equal(stats.disconnects,3);
+});
+test('close rejection from a browser shutdown race is handled even when caller does not await',async t=>{
+  const stats=microphoneFixture(t,{close:()=>Promise.reject(new DOMException('Cannot close a closed AudioContext.','InvalidStateError'))});
+  const mic=await openMicrophone(()=>{});mic.close();
+  await new Promise(resolve=>setImmediate(resolve));await mic.close();
+  assert.equal(stats.closes,1);assert.equal(stats.stops,1);
+});
+test('setup failure preserves the useful error when context cleanup also rejects',async t=>{
+  const originalError=new Error('Audio worklet failed to load');
+  const stats=microphoneFixture(t,{setupError:originalError,close:()=>Promise.reject(new DOMException('Already closed','InvalidStateError'))});
+  await assert.rejects(openMicrophone(()=>{}),e=>e===originalError);assert.equal(stats.stops,1);assert.equal(stats.closes,1);
+});

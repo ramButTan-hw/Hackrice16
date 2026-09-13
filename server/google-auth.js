@@ -1,6 +1,6 @@
 import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
 import {fail} from '../shared/contracts.js';
-export const GOOGLE_SCOPES=['openid','email','https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/calendar.app.created'];
+export const GOOGLE_SCOPES=['openid','email','https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/calendar.app.created','https://www.googleapis.com/auth/calendar.events.freebusy'];
 export function googleAuth({env=process.env,fetcher=fetch,now=Date.now,getPort=()=>Number(env.PORT||3001)}={}){
   // Tokens stay in backend memory. Reconnect Google after restarting the backend.
   let credentials=null,account=null,pending=null,refreshing=null;
@@ -46,7 +46,7 @@ export function googleAuth({env=process.env,fetcher=fetch,now=Date.now,getPort=(
       if(!credentials||account?.sub!==owner)fail('Google connection changed. Please try again.',409);
       const parsed=new URL(url);if(!['docs.googleapis.com','slides.googleapis.com','www.googleapis.com'].includes(parsed.hostname)||parsed.protocol!=='https:')fail('Invalid Google API endpoint.');
       let r;try{r=await fetcher(url,{method,headers:{Authorization:'Bearer '+credentials.access_token,'Content-Type':'application/json',...headers},body:Buffer.isBuffer(body)?body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});}catch{fail('Google did not confirm the operation. Check its status before trying again.',502);}
-      if(!r.ok){const status=r.status;await r.body?.cancel();fail(status===401?'Google sign-in expired. Reconnect Google.':status===403?'Google denied access. Check that the APIs are enabled and the requested permissions were granted.':status===412?'This item changed in Google. Refresh it and make a new preview.':`Google request failed (HTTP ${status}).`,status===401?401:status===412?409:502);}
+      if(!r.ok){const status=r.status;await r.body?.cancel();try { fail(status===401?'Google sign-in expired. Reconnect Google.':status===403?'Google denied access. Check that the APIs are enabled and the requested permissions were granted.':status===412?'This item changed in Google. Refresh it and make a new preview.':`Google request failed (HTTP ${status}).`,status===401?401:status===412?409:502); } catch (error) { error.googleStatus=status; throw error; }}
       return r.status===204?{}:r.json();
     },
   };

@@ -16,7 +16,16 @@ export function summarize(session, now = Date.now()) {
     const ready = end >= i.timestamp + 30000 && before.length >= 3 && after.length >= 3;
     return { interventionId: i.id, status: ready ? 'available' : 'insufficient-data', heartRateChange: ready ? mean(after.map(s => s.heartRate)) - mean(before.map(s => s.heartRate)) : null };
   });
+  const biometrics = Object.fromEntries(['heartRate', 'breathingRate', 'hrv'].map(key => {
+    const readings = session.samples.filter(s => !s.excludedFromAnalysis && !s.onBreak && Number.isFinite(s[key]) && (s.qualityByMetric?.[key] ?? s.quality) >= RULES.quality);
+    const values = readings.map(s => s[key]);
+    const reliable = new Set(readings);
+    // Retain gaps: charts must not connect across unreliable or missing samples.
+    const timeline = session.samples.map(s => ({ timestamp: s.timestamp, value: reliable.has(s) ? s[key] : null }));
+    return [key, { average: mean(values), min: values.length ? Math.min(...values) : null, max: values.length ? Math.max(...values) : null, count: values.length, timeline }];
+  }));
   return {
+    biometrics,
     sessionId: session.id, source: session.source, durationSeconds: Math.max(0, end - session.startedAt) / 1000,
     sampleCount: session.samples.length, validSampleCount: valid.length,
     averageHeartRate: mean(valid.map(s => s.heartRate)), averageBreathingRate: mean(valid.map(s => s.breathingRate)),

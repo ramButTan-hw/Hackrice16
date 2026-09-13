@@ -1,9 +1,16 @@
+import {useState} from 'react';
 export async function openGoogle(url){
-  const open=window.helpPanel?.openGoogle??window.helpBridge?.openGoogle;
+  const open=window.plannerWindow?.openGoogle??window.helpPanel?.openGoogle??window.helpBridge?.openGoogle;
   if(open)return open(url);
   window.open(url,'_blank','noopener,noreferrer');
 }
-export default function GoogleActions({proposals,busy,connected,onConfirm,onCancel,onConnect,onIllustrate}){
+export default function GoogleActions({proposals,busy,connected,onConfirm,onCancel,onConnect,onIllustrate,onOpen}){
+  const [linkError,setLinkError]=useState(null);
+  async function openResult(proposal) {
+    setLinkError(null);
+    try { await (onOpen ?? openGoogle)(proposal.result.url); }
+    catch (error) { setLinkError({id:proposal.id,message:error.message}); }
+  }
   return <div className="google-actions">{proposals.map(p=><article className="google-action" key={p.id}>
     <span className="ai-message-label">{p.status==='done'?'SAVED IN GOOGLE':p.status==='cancelled'?'CANCELLED':p.status==='uncertain'?'CHECK GOOGLE':p.kind.endsWith('_slides')?'GOOGLE SLIDES PREVIEW':p.kind.endsWith('doc')?'GOOGLE DOC PREVIEW':'CALENDAR PREVIEW'}</span>
     <h3>{p.title}</h3>
@@ -17,7 +24,8 @@ export default function GoogleActions({proposals,busy,connected,onConfirm,onCanc
     {p.previousStart&&<small>Previously: {new Date(p.previousStart).toLocaleString(undefined,{timeZone:p.timeZone})}</small>}
     {p.description&&<p>{p.description}</p>}
     {p.error&&<p role="alert">{p.error}</p>}
-    {p.result?.url&&<button type="button" onClick={()=>void openGoogle(p.result.url)}>Open in Google ↗</button>}
+    {p.result?.url&&<button type="button" onClick={()=>void openResult(p)}>Open in Google ↗</button>}
+    {linkError?.id===p.id&&<div role="alert"><p>{linkError.message}</p><label>Google link<input className="google-link-fallback" readOnly value={p.result.url} onFocus={e=>e.target.select()}/></label></div>}
     {p.status==='preview'&&<><p className="google-preview-hint">Review this preview. Say “confirm” for the first action, or ask for changes.</p><div className="google-action-buttons">{connected?<button type="button" disabled={busy} onClick={()=>onConfirm(p)}>Confirm</button>:<button type="button" disabled={busy} onClick={onConnect}>Connect Google to save</button>}<button type="button" disabled={busy} onClick={()=>onCancel(p)}>Cancel</button></div></>}
   </article>)}</div>;
 }

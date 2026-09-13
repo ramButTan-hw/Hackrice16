@@ -1,3 +1,5 @@
+import {websiteRequest,openWebsite} from './website-request.js';
+import {isPlannerRequest,openPlanner} from './planner-request.js';
 import {isBreakRequest,endForBreak,BREAK_REPLY} from './break-request.js';
 import {shouldCaptureScreen} from './screen-request.js';
 import GoogleActions,{openGoogle} from './GoogleActions.jsx';
@@ -26,6 +28,8 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
     if(pending&&/^(yes|confirm|confirm it|yes please|save it|create it|do it|approve)[.! ]*$/i.test(text)){await performGoogle(pending,'confirm');return;}
     if(pending?.kind.endsWith('_slides')&&/^(generate|add|create)( the)? (images|illustrations)[.! ]*$/i.test(text)){await performGoogle(pending,'illustrate');return;}
     if(pending&&/^(cancel|cancel it|cancel that|no|no thanks)[.! ]*$/i.test(text)){await performGoogle(pending,'cancel');return;}
+    const website=websiteRequest(text);if(website){await showWebsite(text,website);return;}
+    if(isPlannerRequest(text)){await showPlanner(text);return;}
     if(isBreakRequest(text)){await takeBreak(text);return;}
     if(isDismissal(text)){stopRecording();onAction('close');return;}
     busy.current=true;setPhase('thinking');setError('');const token=generation.current;
@@ -61,11 +65,25 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
         }
         if(token!==generation.current)return;
         for(const old of proposals.filter(p=>p.status==='preview'))void fetch('/api/google/actions/'+old.id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current})}).catch(()=>{});setProposals(result.proposals);}
+      if(result.uiAction==='open_planner'){stopRecording();await openPlanner();if(token!==generation.current)return;setMessages([...base,{role:'model',text:'Your planner is open.'}]);}
       if(result.action==='break_start'){await endForBreak(sessionId);if(token!==generation.current)return;setMessages([...base,{role:'model',text:BREAK_REPLY}]);onAction('break_start');}
       if(result.action==='close'){follow.current=false;onAction('close');}
     }catch(e){if(token===generation.current){follow.current=false;setMessages(messages);setDraft(user.text);setError(e.name==='AbortError'?'Reply timed out. Your message is ready to retry.':e.message);}}
     finally{clearTimeout(timeout);if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current){timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);}else onAction('idle');}}
   }
+  async function showWebsite(text,url) {
+    stopRecording();busy.current=true;setError('');const token=generation.current;
+    try{await openWebsite(url);if(token!==generation.current)return;setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:`Opened ${new URL(url).hostname} in your browser.`}]);}
+    catch(e){if(token===generation.current){setError(e.message);setDraft(text);}}
+    finally{if(token===generation.current){busy.current=false;setPhase('idle');}}
+  }
+  async function showPlanner(text) {
+    stopRecording();busy.current=true;setError('');const token=generation.current;
+    try { await openPlanner(); if(token!==generation.current)return;setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:'Your planner is open.'}]); }
+    catch(e){if(token===generation.current){setError(e.message);setDraft(text);}}
+    finally{if(token===generation.current){busy.current=false;setPhase('idle');}}
+  }
+  async function openGoogleResult(url){stopRecording();await openGoogle(url);}
   async function takeBreak(text){
     busy.current=true;setPhase('thinking');setError('');const token=generation.current;
     try{await endForBreak(sessionId);if(token!==generation.current)return;setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:BREAK_REPLY}]);setDraft('');onAction('break_start');}
@@ -131,7 +149,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
       {initialText&&<div className="ai-message model"><span className="ai-message-label">CHECK-IN</span><p>{initialText}</p></div>}
       {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">JARVIS</span>}<p>{m.text||'Thinking…'}</p>{m.image&&<figure className="generated-image"><img src={m.image} alt={m.imagePrompt||'AI-generated image'}/><figcaption>AI-generated · <a href={m.image} download={'jarvis-image-'+i+(m.image.startsWith('data:image/jpeg')?'.jpg':'.png')}>Download image</a></figcaption>{proposals.some(p=>p.status==='preview'&&p.slides)&&<select aria-label="Add generated image to slide" value="" disabled={busy.current} onChange={e=>void attachImage(m,e.target.value)}><option value="">Add to a slide…</option>{proposals.filter(p=>p.status==='preview'&&p.slides).flatMap(p=>p.slides.map((slide,n)=><option key={p.id+':'+n} value={p.id+':'+n}>{p.title} · Slide {n+1}: {slide.title}</option>))}</select>}</figure>}</div>)}
       {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>What can we work on?</h2><p>Ask aloud or type below.<br/>I can help with what’s on your screen.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Give me a concise summary of my screen.',true)}>Summarize screen</button><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Make a checklist</button></div></div>}
-      <GoogleActions proposals={proposals} busy={busy.current} connected={google.connected} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
+      <GoogleActions onOpen={openGoogleResult} proposals={proposals} busy={busy.current} connected={google.connected} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
     </div>
     {error&&<p className="voice-error" role="alert">{error}</p>}
     <div className="ai-status" role="status"><div className={'assistant-orb '+(phase==='recording'?'listening':'')} aria-hidden="true"><i/><i/><i/><i/><i/></div><span>{status}</span><small>{phase==='recording'?'Pause to send':phase==='idle'?'Say “hey Jarvis”':''}</small></div>

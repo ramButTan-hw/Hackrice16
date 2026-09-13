@@ -36,6 +36,15 @@ export function googleWorkspace({auth,path='data/google-workspace.json',now=Date
   async function target(draft,state){const items=draft.kind==='append_doc'?state.documents:draft.kind==='update_slides'?(state.presentations??[]):state.events;const item=items.find(i=>i.id===draft.targetId);if(!item)fail('Select an item created by Jarvis in this Google account.',400);return item;}
   const view=p=>({id:p.id,...p.draft,expiresAt:p.expiresAt,status:p.status,result:p.result,error:p.error,images:p.images??{}});
   return {
+    async plannerCalendarId(timeZone) { return exclusive(async () => {
+      const { owner, state } = await owned();
+      if (!state.calendarId && timeZone) {
+        const calendar = await auth.request(cal + '/calendars', 'POST', { summary: 'Jarvis work sessions', timeZone }, owner);
+        if (!calendar.id) fail('Google did not return a calendar ID.', 502);
+        state.calendarId = calendar.id; await persist();
+      }
+      return state.calendarId;
+    }); },
     drafts(conversationId){return [...proposals.values()].filter(p=>p.conversationId===conversationId&&p.status==='preview'&&p.expiresAt>now()).slice(-3).map(view);},
     async context(){if(!auth.status().connected)return {connected:false,documents:[],events:[]};const {state}=await owned();return {connected:true,documents:state.documents.slice(-15),events:state.events.slice(-15),presentations:(state.presentations??[]).slice(-15).map(({images,...item})=>item)};},
     async propose(raw,conversationId){

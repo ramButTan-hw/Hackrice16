@@ -1,3 +1,5 @@
+import SessionAnalytics from './SessionAnalytics.jsx';
+import Planner from './Planner.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
@@ -107,6 +109,10 @@ function App() {
     return () => { stopped = true; };
   }, [tab]);
 
+  async function openPlanner() {
+    if (desktop?.planner) { try { await desktop.planner(); } catch (e) { setError(e.message); } }
+    else setTab('planner');
+  }
   async function toggleCompact() {
     const next = !compact;
     try {
@@ -142,7 +148,8 @@ function App() {
     setBusy(true); setError(''); epoch.current++;
     try {
       const data = await api('/sessions/' + session.id + '/end', {});
-      setSession(data); remember(null);
+      setSession(data); remember(null); setTab('session');
+      if (compact) void toggleCompact();
       void window.helpBridge?.session(null).catch(()=>{});
       void window.presage?.stop().catch(()=>{});
       setSummary(await api('/sessions/' + data.id + '/summary'));
@@ -187,12 +194,14 @@ function App() {
               <button className={tab === 'session' ? 'current' : ''} aria-pressed={tab === 'session'} onClick={() => setTab('session')}>Session</button>
               <button className={tab === 'history' ? 'current' : ''} aria-pressed={tab === 'history'} onClick={() => setTab('history')}>History</button>
               <button className={tab === 'chat' ? 'current' : ''} aria-pressed={tab === 'chat'} onClick={() => setTab('chat')}>Chat</button>
+              <button className={tab === 'planner' ? 'current' : ''} aria-pressed={tab === 'planner'} onClick={openPlanner}>Planner</button>
               <button className={tab === 'log' ? 'current' : ''} aria-pressed={tab === 'log'} onClick={() => setTab('log')}>Log</button>
             </nav>
             <div className="content">
               {session?.source==='demo'&&<p className="monitor-indicator" role="status"><strong>SIMULATED BIOMETRICS</strong> · Demo session · Gemini responses are real.</p>}
               {tab !== 'session' && monitoring && <p className="monitor-indicator">Camera on · Automatic analysis running</p>}
               <div hidden={tab !== 'session'}>
+                {session?.status === 'ended' && <SessionAnalytics key={session.id} session={session} api={api} onPlan={openPlanner}/>}
                 {!active&&<div className="session-intro"><span className="eyebrow">{session?'A FRESH START':'YOUR WORK COMPANION'}</span><h1>One thing at a time.</h1><p>Pick a task. I’ll be here if you need a hand.</p></div>}
                 <form className={'session-card '+(!active?'session-idle':'')} onSubmit={start}>
                   <label className="eyebrow" htmlFor="intention">WORKING ON</label>
@@ -201,7 +210,7 @@ function App() {
                     {active ? <button className="session-action ending" type="button" disabled={busy} onClick={end} aria-label="End session"><Icon name="stop"/></button> : <button className="session-action start-session" disabled={busy || !goal.trim()} aria-label="Start session"><Icon name="play"/><span>Start session</span></button>}</div>
                 </form>
                 {!active&&<button type="button" className="idle-help" onClick={()=>setTab('chat')}><span className="idle-help-icon" aria-hidden="true">✦</span><span><strong>Need a hand getting started?</strong><small>Ask Jarvis a question or summarize your screen.</small></span><Icon name="arrow"/></button>}
-              <Assistance session={session} onSessionEnded={data=>{epoch.current++;setSession(data);remember(null);void window.presage?.stop().catch(()=>{});}} onReveal={()=>{setTab('session');if(compact)void toggleCompact();}}/>
+              <Assistance session={session} onSessionEnded={data=>{epoch.current++;setSession(data);remember(null);setTab('session');if(compact)void toggleCompact();void window.presage?.stop().catch(()=>{});}} onReveal={()=>{setTab('session');if(compact)void toggleCompact();}}/>
 
                 {active&&session.demoScenario&&<DemoCamera sessionId={session.id}/>}
                 {active&&session.demoScenario&&<details className="camera-checkin demo-details"><summary>Pulse-rise demo <span>Simulated</span></summary><p>{now-session.startedAt<=20000?'Building a simulated baseline around 72 bpm (20 seconds).':now-session.startedAt<100000?'Pulse fluctuating around 94 bpm. Demo uses a shortened 30-second hold before review.':now-session.startedAt<=300000?'Recovery: easing back toward 72 bpm.':'Scenario complete. End the session when ready.'}</p><p>Camera preview is live. Pulse, breathing and inactivity are synthetic and stored in this separate demo session. Expect a Gemini review around one minute; Gemini can choose not to interrupt.</p><p>Gemini reviews: {session.monitor?.calls??0} / 6 · {session.monitor?.status?.replaceAll('_',' ')}</p>{session.monitor?.error&&<p role="alert">{session.monitor.error}</p>}</details>}
@@ -210,6 +219,7 @@ function App() {
                 {message && <section className="companion-note"><div><span className="eyebrow">CHECK-IN</span><p>{message.text}</p>{message.provider === 'demo' && <small>Demo check-in</small>}</div></section>}
                 <DevicePermissions/>{session&&<details className="details"><summary>Session details <Icon name="chevron"/></summary><div className="detail-body"><p>{state?.reason ?? 'Readings will appear when the camera integration connects. Your timer works independently.'}</p><dl><div><dt>Samples received</dt><dd>{session?.samples?.length ?? 0}</dd></div><div><dt>Companion check-ins</dt><dd>{session?.interventions?.length ?? 0}</dd></div>{summary && <div><dt>Average heart rate</dt><dd>{summary.averageHeartRate == null ? '—' : summary.averageHeartRate.toFixed(1) + ' bpm'}</dd></div>}</dl></div></details>}
               </div>{tab === 'history' ? <section className="history"><div className="history-list">{history.length ? history.map(item => <button className="history-item" key={item.id} disabled={busy || (active && session.id !== item.id)} onClick={() => openHistory(item)}><div className="history-item-text"><strong>{item.goal}</strong><small>{new Date(item.startedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {item.status === 'active' ? 'In progress' : elapsed(item, now)}{item.source === 'demo' ? ' · Demo' : ''}</small></div><Icon name="arrow"/></button>) : <div className="empty-history"><p>No sessions yet.</p><button onClick={() => setTab('session')}>Start a session <Icon name="arrow"/></button></div>}</div></section> : null}
+              {tab === 'planner' && <Planner api={api}/>}
               <Chat visible={tab === 'chat'} sessionId={session?.id}/>
               <EventLog visible={tab === 'log'} sessionId={session?.id}/>
               {tab !== 'session' && message && <section className="companion-note"><div><span className="eyebrow">COMPANION</span><p>{message.text}</p></div></section>}
@@ -222,6 +232,20 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById('root')).render(<React.StrictMode>{new URLSearchParams(location.search).has('appearance-window')?<AppearanceWindow/>:new URLSearchParams(location.search).has('help-window')?<HelpWindow/>:<App/>}</React.StrictMode>);
+function PlannerWindow() {
+  const [appearance,setAppearance]=useTheme();
+  const controls=window.plannerWindow;
+  useEffect(() => {
+    document.title='Jarvis Planner';
+    document.documentElement.classList.toggle('desktop',Boolean(controls));
+    document.documentElement.classList.add('planner-surface');
+    return()=>{document.documentElement.classList.remove('desktop','planner-surface');};
+  }, []);
+  return <div className="stage planner-stage"><main className="glass-shell planner-shell" aria-label="Jarvis planner window">
+    <header className="topbar"><div className="window-drag-area drag app-wordmark"><span aria-hidden="true">✦</span> Jarvis <small className="planner-window-label">Planner</small></div><div className="window-actions"><ThemePicker settings={appearance} onChange={setAppearance}/>{controls&&<><button className="icon-button" aria-label="Minimize planner" onClick={()=>controls.minimize()}><Icon name="minus"/></button><button className="icon-button" aria-label="Close planner" onClick={()=>controls.close()}><Icon name="close"/></button></>}</div></header>
+    <div className="content planner-window"><Planner api={api}/></div>
+  </main></div>;
+}
+createRoot(document.getElementById('root')).render(<React.StrictMode>{new URLSearchParams(location.search).has('planner-window')?<PlannerWindow/>:new URLSearchParams(location.search).has('appearance-window')?<AppearanceWindow/>:new URLSearchParams(location.search).has('help-window')?<HelpWindow/>:<App/>}</React.StrictMode>);
 
 
