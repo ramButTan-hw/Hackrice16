@@ -1,10 +1,10 @@
 import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
 import {fail} from '../shared/contracts.js';
 export const GOOGLE_SCOPES=['openid','email','https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/calendar.app.created'];
-export function googleAuth({env=process.env,fetcher=fetch,now=Date.now}={}){
+export function googleAuth({env=process.env,fetcher=fetch,now=Date.now,getPort=()=>Number(env.PORT||3001)}={}){
   // Tokens stay in backend memory. Reconnect Google after restarting the backend.
   let credentials=null,account=null,pending=null,refreshing=null;
-  const redirect=()=>`http://127.0.0.1:${Number(env.PORT||3001)}/oauth/google/callback`;
+  const redirect=()=>`http://127.0.0.1:${getPort()}/oauth/google/callback`;
   const configured=()=>Boolean(env.GOOGLE_CLIENT_ID);
   async function token(params){
     let r;try{r=await fetcher('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,...(env.GOOGLE_CLIENT_SECRET?{client_secret:env.GOOGLE_CLIENT_SECRET}:{}),...params}),signal:AbortSignal.timeout(15000)});}catch{fail('Google sign-in could not connect. Try connecting again.',502);}
@@ -15,8 +15,8 @@ export function googleAuth({env=process.env,fetcher=fetch,now=Date.now}={}){
     status:()=>({configured:configured(),connected:Boolean(credentials&&account),email:account?.email??null,accountId:account?.sub??null}),
     begin(){
       if(!configured())fail('Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from a Desktop OAuth client to .env, then restart.',503);
-      const state=randomBytes(24).toString('base64url'),verifier=randomBytes(48).toString('base64url');pending={state,verifier,expiresAt:now()+600000};
-      const params=new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,redirect_uri:redirect(),response_type:'code',scope:GOOGLE_SCOPES.join(' '),access_type:'offline',prompt:'consent',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'});
+      const state=randomBytes(24).toString('base64url'),verifier=randomBytes(48).toString('base64url');pending={state,verifier,redirectUri:redirect(),expiresAt:now()+600000};
+      const params=new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,redirect_uri:pending.redirectUri,response_type:'code',scope:GOOGLE_SCOPES.join(' '),access_type:'offline',prompt:'consent',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'});
       return {url:'https://accounts.google.com/o/oauth2/v2/auth?'+params};
     },
     async callback(query){
@@ -25,7 +25,7 @@ export function googleAuth({env=process.env,fetcher=fetch,now=Date.now}={}){
       const attempt=pending;pending=null;
       if(query.error)fail('Google access was not granted. You can reconnect from Jarvis.',400);
       if(typeof query.code!=='string'||query.code.length>4096)fail('Missing Google authorization code.');
-      const next=await token({code:query.code,code_verifier:attempt.verifier,redirect_uri:redirect(),grant_type:'authorization_code'});
+      const next=await token({code:query.code,code_verifier:attempt.verifier,redirect_uri:attempt.redirectUri,grant_type:'authorization_code'});
       const scopes=new Set(String(next.scope||'').split(' '));
       if(!GOOGLE_SCOPES.filter(s=>s.startsWith('https:')).every(s=>scopes.has(s)))fail('Please grant both Docs/Drive and Calendar permissions when connecting Google.',403);
       const r=await fetcher('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+next.access_token},signal:AbortSignal.timeout(10000)});

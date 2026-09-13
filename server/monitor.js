@@ -116,7 +116,7 @@ export function monitoringService({ sessions, now = Date.now, analyze = analyzeW
       if(!alive())return;
       await sessions.update(id,s=>{s.monitor.error=error.name==='TimeoutError'?'Gemini check-in timed out. Voice help is still available.':error.message;s.monitor.lastRequestMs=Date.now()-requestStarted;appendEvent(s,now(),'gemini','failed',{message:s.monitor.error,durationMs:s.monitor.lastRequestMs});});
       if(s.source!=='demo'||!s.demoScenario)throw error;
-      result={decision:'intervene',reason:'Demo-only local fallback: Gemini analysis was unavailable.',message:'How’s the work going—would you like a hand?',provider:'demo'};
+      result={decision:'intervene',reason:'Demo-only local fallback: Gemini analysis was unavailable.',message:'Hey, just checking in. How are you feeling about the work? We can take it one step at a time.',provider:'demo'};
     }
     if (!alive()) return;
     s = await sessions.get(id);

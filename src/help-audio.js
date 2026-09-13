@@ -1,4 +1,5 @@
 export async function openMicrophone(onSamples,onFailure=()=>{}){
+  await globalThis.devicePermissions?.ensure('microphone');
   const context=new AudioContext({sampleRate:16000});let stream;
   let handler=onSamples,closed=false;
   try{

@@ -1,15 +1,19 @@
+import {isBreakRequest,endForBreak,BREAK_REPLY} from './break-request.js';
+import {shouldCaptureScreen} from './screen-request.js';
 import GoogleActions,{openGoogle} from './GoogleActions.jsx';
 import {useEffect,useRef,useState} from 'react';
 import {openMicrophone} from './help-audio.js';
 import {utterance} from './utterance.js';
 import {isDismissal} from './dismiss-intent.js';
 import {jsonResponse,streamReply} from './companion-api.js';
-export default function CompanionChat({sessionId,initialText='',listenId=0,onAction=()=>{}}){
+export default function CompanionChat({sessionId,initialText='',listenId=0,visible=true,onAction=()=>{}}){
   const [messages,setMessages]=useState([]),[draft,setDraft]=useState(''),[phase,setPhase]=useState('idle'),[error,setError]=useState(''),[share,setShare]=useState(false),[remember,setRemember]=useState(true),[memoryStatus,setMemoryStatus]=useState(''),[memories,setMemories]=useState(null);
   const [proposals,setProposals]=useState([]),[google,setGoogle]=useState({connected:false}),[connecting,setConnecting]=useState(false);
   const conversation=useRef(crypto.randomUUID());
   const recorder=useRef(null),generation=useRef(0),request=useRef(null),busy=useRef(false),recording=useRef(false),timer=useRef(null),log=useRef(null),callbacks=useRef({}),follow=useRef(false);
+  const visibleRef=useRef(visible);visibleRef.current=visible;
   callbacks.current={startRecording,send,onAction};
+  useEffect(()=>{if(!visible){clearTimeout(timer.current);follow.current=false;if(recording.current)stopRecording();}},[visible]);
   useEffect(()=>{conversation.current=crypto.randomUUID();setProposals([]);void refreshGoogle();setMessages([]);setDraft('');setError('');setPhase('idle');fetch('/api/companion/config').then(jsonResponse).then(c=>setMemoryStatus(c.memory?'Backboard ready':'Backboard not configured')).catch(()=>{});
     return()=>{generation.current++;request.current?.abort();clearTimeout(timer.current);recorder.current?.close();recorder.current=null;recording.current=false;busy.current=false;};
   },[sessionId]);
@@ -22,6 +26,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,onAct
     if(pending&&/^(yes|confirm|confirm it|yes please|save it|create it|do it|approve)[.! ]*$/i.test(text)){await performGoogle(pending,'confirm');return;}
     if(pending?.kind.endsWith('_slides')&&/^(generate|add|create)( the)? (images|illustrations)[.! ]*$/i.test(text)){await performGoogle(pending,'illustrate');return;}
     if(pending&&/^(cancel|cancel it|cancel that|no|no thanks)[.! ]*$/i.test(text)){await performGoogle(pending,'cancel');return;}
+    if(isBreakRequest(text)){await takeBreak(text);return;}
     if(isDismissal(text)){stopRecording();onAction('close');return;}
     busy.current=true;setPhase('thinking');setError('');const token=generation.current;
     const user={role:'user',text:text.slice(0,2000)},history=[...messages.slice(-6).map(m=>({role:m.role,text:m.text.slice(0,2000)})),user];
@@ -30,8 +35,9 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,onAct
     const controller=new AbortController();request.current=controller;const timeout=setTimeout(()=>controller.abort(),55000);
     try{
       let screenshot;
-      const screenRequest=/(screen|page)/i.test(text)&&/(notes|checklist|study guide|slides|presentation)/i.test(text);
-      if(share||captureOnce||screenRequest){const capture=window.helpPanel?.snapshot??window.helpBridge?.snapshot;if(!capture)throw new Error('Screen capture requires the desktop app. Uncheck Screen to continue.');screenshot=await capture();}
+      if(shouldCaptureScreen(text,{sharing:share,once:captureOnce})){const capture=window.helpPanel?.snapshot??window.helpBridge?.snapshot;if(!capture)throw new Error('Screen capture requires the desktop app. Uncheck Screen to continue.');screenshot=await capture();}
+      if(token!==generation.current)return;
+      controller.signal.throwIfAborted();
       let answer='';const result=await streamReply({messages:history,sessionId,screenshot,memory:remember,conversationId:conversation.current,activeDeckId:[...proposals].reverse().find(p=>p.result?.id&&p.kind.endsWith('_slides'))?.result.id,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone},delta=>{if(token!==generation.current)return;answer+=delta;setMessages([...base,{role:'model',text:answer}]);},controller.signal);
       if(token!==generation.current)return;
       let generated;
@@ -55,12 +61,19 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,onAct
         }
         if(token!==generation.current)return;
         for(const old of proposals.filter(p=>p.status==='preview'))void fetch('/api/google/actions/'+old.id+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:conversation.current})}).catch(()=>{});setProposals(result.proposals);}
+      if(result.action==='break_start'){await endForBreak(sessionId);if(token!==generation.current)return;setMessages([...base,{role:'model',text:BREAK_REPLY}]);onAction('break_start');}
       if(result.action==='close'){follow.current=false;onAction('close');}
     }catch(e){if(token===generation.current){follow.current=false;setMessages(messages);setDraft(user.text);setError(e.name==='AbortError'?'Reply timed out. Your message is ready to retry.':e.message);}}
     finally{clearTimeout(timeout);if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current){timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);}else onAction('idle');}}
   }
+  async function takeBreak(text){
+    busy.current=true;setPhase('thinking');setError('');const token=generation.current;
+    try{await endForBreak(sessionId);if(token!==generation.current)return;setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:BREAK_REPLY}]);setDraft('');onAction('break_start');}
+    catch(e){if(token===generation.current){setError(e.message);setDraft(text);follow.current=false;}}
+    finally{if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current)timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);else onAction('idle');}}
+  }
   async function startRecording(){
-    if(busy.current||recording.current)return;
+    if(!visibleRef.current||busy.current||recording.current)return;
     clearTimeout(timer.current);follow.current=true;recording.current=true;onAction('listening');setPhase('microphone');setError('');const token=generation.current;
     const endpoint=utterance();let acceptAfter=Infinity;
     const fail=e=>{if(token!==generation.current)return;stopRecording();setError('Microphone unavailable. You can type instead. '+e.message);};
@@ -117,14 +130,14 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,onAct
     <div ref={log} className="voice-transcript" role="log" aria-live="polite">
       {initialText&&<div className="ai-message model"><span className="ai-message-label">CHECK-IN</span><p>{initialText}</p></div>}
       {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">JARVIS</span>}<p>{m.text||'Thinking…'}</p>{m.image&&<figure className="generated-image"><img src={m.image} alt={m.imagePrompt||'AI-generated image'}/><figcaption>AI-generated · <a href={m.image} download={'jarvis-image-'+i+(m.image.startsWith('data:image/jpeg')?'.jpg':'.png')}>Download image</a></figcaption>{proposals.some(p=>p.status==='preview'&&p.slides)&&<select aria-label="Add generated image to slide" value="" disabled={busy.current} onChange={e=>void attachImage(m,e.target.value)}><option value="">Add to a slide…</option>{proposals.filter(p=>p.status==='preview'&&p.slides).flatMap(p=>p.slides.map((slide,n)=><option key={p.id+':'+n} value={p.id+':'+n}>{p.title} · Slide {n+1}: {slide.title}</option>))}</select>}</figure>}</div>)}
-      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>A little help, right here.</h2><p>Ask a question, untangle a problem,<br/>or find your next step.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Screen → study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Screen → checklist</button></div></div>}
+      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>What can we work on?</h2><p>Ask aloud or type below.<br/>I can help with what’s on your screen.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Give me a concise summary of my screen.',true)}>Summarize screen</button><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Make a checklist</button></div></div>}
       <GoogleActions proposals={proposals} busy={busy.current} connected={google.connected} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
     </div>
     {error&&<p className="voice-error" role="alert">{error}</p>}
     <div className="ai-status" role="status"><div className={'assistant-orb '+(phase==='recording'?'listening':'')} aria-hidden="true"><i/><i/><i/><i/><i/></div><span>{status}</span><small>{phase==='recording'?'Pause to send':phase==='idle'?'Say “hey Jarvis”':''}</small></div>
     <form className="companion-compose" onSubmit={e=>{e.preventDefault();void send();}}>
-      <div className="ai-input"><textarea onFocus={()=>{if(recording.current)stopRecording();}} aria-label="Message Jarvis" rows={1} maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Or type a question…" disabled={phase!=='idle'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><button className="ai-send" aria-label="Send message" title="Send · Enter" disabled={phase!=='idle'||!draft.trim()}>↑</button></div>
-      <div className="ai-bottom"><button className="ai-listen" type="button" disabled={busy.current} onClick={()=>recording.current?stopRecording():void startRecording()}>{phase==='recording'?'Ⅱ Pause':'◉ Listen'}</button><label className={'ai-screen '+(share?'enabled':'')} title="Send a screenshot with your next question"><input type="checkbox" checked={share} disabled={phase!=='idle'} onChange={e=>setShare(e.target.checked)}/><span>Screen {share?'on':'off'}</span></label><details className="ai-settings"><summary aria-label="Companion settings" title="Settings and memory">•••</summary><div className="ai-settings-panel"><div className="google-connection"><strong>Google Workspace</strong><p>{google.connected?google.email:connecting?'Finish sign-in in your browser':'Create Docs, Slides and work blocks'}</p><button type="button" disabled={busy.current} onClick={()=>void (google.connected?disconnectGoogle():connectGoogle())}>{google.connected?'Disconnect Google':connecting?'Connect again':'Connect Google'}</button></div><label><input type="checkbox" checked={remember} disabled={phase!=='idle'} onChange={e=>setRemember(e.target.checked)}/> Remember work context</label><p>{memoryStatus||'Preferences and progress across sessions.'}</p><button type="button" onClick={()=>void loadMemory()}>View saved memories</button>{initialText&&<div className="ai-feedback"><span>How’s it going?</span><button type="button" onClick={()=>onAction('fine')}>Doing fine</button><button type="button" onClick={()=>onAction('tired')}>Feeling tired</button></div>}{messages.length>1&&<button type="button" onClick={()=>onAction('helpful')}>This helped</button>}</div></details></div>
+      <div className="ai-input"><textarea onFocus={()=>{if(recording.current)stopRecording();}} aria-label="Message Jarvis" rows={1} maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Ask Jarvis anything…" disabled={phase!=='idle'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><button className="ai-send" aria-label="Send message" title="Send · Enter" disabled={phase!=='idle'||!draft.trim()}>↑</button></div>
+      <div className="ai-bottom"><button className="ai-listen" type="button" disabled={busy.current} onClick={()=>recording.current?stopRecording():void startRecording()}>{phase==='recording'?'Ⅱ Pause':'◉ Listen'}</button><label className={'ai-screen '+(share?'enabled':'')} title="Send a screenshot with your next question"><input type="checkbox" checked={share} disabled={phase!=='idle'} onChange={e=>setShare(e.target.checked)}/><span>{share?'Screen shared':'Share screen'}</span></label><details className="ai-settings"><summary aria-label="Companion settings" title="Settings and memory">•••</summary><div className="ai-settings-panel"><div className="google-connection"><strong>Google Workspace</strong><p>{google.connected?google.email:connecting?'Finish sign-in in your browser':'Create Docs, Slides and work blocks'}</p><button type="button" disabled={busy.current} onClick={()=>void (google.connected?disconnectGoogle():connectGoogle())}>{google.connected?'Disconnect Google':connecting?'Connect again':'Connect Google'}</button></div><label><input type="checkbox" checked={remember} disabled={phase!=='idle'} onChange={e=>setRemember(e.target.checked)}/> Remember work context</label><p>{memoryStatus||'Preferences and progress across sessions.'}</p><button type="button" onClick={()=>void loadMemory()}>View saved memories</button>{initialText&&<div className="ai-feedback"><span>How’s it going?</span><button type="button" onClick={()=>onAction('fine')}>Doing fine</button><button type="button" onClick={()=>onAction('tired')}>Feeling tired</button></div>}{messages.length>1&&<button type="button" onClick={()=>onAction('helpful')}>This helped</button>}</div></details></div>
     </form>
     {memories&&<div className="memory-list"><header><strong>Saved memories</strong><button aria-label="Close memories" onClick={()=>setMemories(null)}>×</button></header>{!memories.length&&<p>No saved memories yet.</p>}{memories.map(m=><div key={m.id??m.memory_id}><p>{m.content}</p><button onClick={()=>void forget(m.id??m.memory_id)}>Forget</button></div>)}</div>}
   </>;

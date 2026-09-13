@@ -1,14 +1,44 @@
-const { app, BrowserWindow, ipcMain, screen, powerMonitor, desktopCapturer, globalShortcut, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, desktopCapturer, globalShortcut, shell, dialog, systemPreferences, session, Notification } = require('electron');
+const {finishSessionAndStop}=require('./end-session.cjs');
 const path = require('node:path');
+const {attachEdgeSnap}=require('./window-layout.cjs');
+const expandedSizes=new WeakMap();
 const { existsSync } = require('node:fs');
+// Source launches must not depend on the terminal/Finder working directory.
+if (!app.isPackaged) process.chdir(path.join(__dirname, '..'));
 if (existsSync('.env')) process.loadEnvFile('.env');
 const presage = require('./presage.cjs').createPresage({ idle: () => powerMonitor.getSystemIdleTime() });
 const help = require('./help-runtime.cjs').createHelpRuntime();
+const {createPermissions,installMediaPermissions}=require('./permissions.cjs');
+const permissions=createPermissions({systemPreferences,shell,desktopCapturer});
 let helpSession=null;
 const development = process.argv.includes('--dev');
 let server;
 let backend;
 let appUrl;
+let mainWindow=null,lastSession=null,closing=null,shutdownComplete=false;
+if(process.platform==='win32')app.setAppUserModelId(app.isPackaged?'com.jarvis.companion':process.execPath);
+const notifier=require('./checkin-notification.cjs').createCheckinNotifier({Notification,beep:()=>shell.beep(),flash:()=>mainWindow?.flashFrame(true),reveal:()=>{if(helpPanel&&!helpPanel.isDestroyed())helpPanel.show();else mainWindow?.show();},report:message=>console.warn(message)});
+
+function closeApplication(){
+  if(closing)return closing;
+  const id=lastSession;
+  mainWindow?.setEnabled(false);
+  closeHelpPanel();help.stop();
+  closing=(async()=>{
+    await finishSessionAndStop(development?'http://127.0.0.1:3001':appUrl,id,{stop:()=>presage.stop()});
+    await backend?.locals.close();
+    server?.close();
+    shutdownComplete=true;
+    globalShortcut.unregisterAll();
+    app.quit();
+  })().catch(error=>{
+    console.error('App close:',error.message);
+    if(mainWindow&&!mainWindow.isDestroyed()){mainWindow.setEnabled(true);mainWindow.show();}
+    dialog.showErrorBox('Session could not be ended','The app has stayed open so the session is not left running after exit. Check the backend connection, then close again.');
+  }).finally(()=>{closing=null;});
+  return closing;
+}
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -17,7 +47,10 @@ function createWindow() {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    resizable: false,
+    resizable: true,
+    minWidth: 380,
+    minHeight: 360,
+    alwaysOnTop: true,
     maximizable: false,
     fullscreenable: false,
     autoHideMenuBar: true,
@@ -31,6 +64,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
+  mainWindow=window;
+  attachEdgeSnap(window,screen);
+  window.on('close',event=>{if(!shutdownComplete){event.preventDefault();void closeApplication();}});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => {
     if (new URL(url).origin !== new URL(appUrl).origin) event.preventDefault();
@@ -54,7 +90,8 @@ ipcMain.handle('help:panel',(event,state)=>{
   if(!helpPanel){
     const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     const width=Math.min(440,area.width-24),height=Math.min(440,area.height-24);
-    helpPanel=new BrowserWindow({width,height,x:area.x+area.width-width-18,y:area.y+24,show:false,frame:false,transparent:true,resizable:false,alwaysOnTop:true,skipTaskbar:true,title:'Companion voice',autoHideMenuBar:true,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,preload:path.join(__dirname,'help-panel-preload.cjs')}});
+    helpPanel=new BrowserWindow({width,height,x:area.x+area.width-width-18,y:area.y+24,show:false,frame:false,transparent:true,resizable:true,minWidth:360,minHeight:320,maximizable:false,fullscreenable:false,alwaysOnTop:mainWindow?.isAlwaysOnTop()??true,skipTaskbar:true,title:'Companion voice',autoHideMenuBar:true,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,preload:path.join(__dirname,'help-panel-preload.cjs')}});
+    attachEdgeSnap(helpPanel,screen);
     helpPanel.once('ready-to-show',()=>helpPanel?.showInactive());
     helpPanel.webContents.setWindowOpenHandler(()=>({action:'deny'}));
     helpPanel.webContents.on('will-navigate',e=>e.preventDefault());
@@ -91,25 +128,41 @@ ipcMain.handle('window:compact', (event, compact) => {
   const window = trustedWindow(event);
   const bounds = window.getBounds();
   const area = screen.getDisplayMatching(bounds).workArea;
-  const width = Math.min(compact ? 368 : 468, area.width);
-  const height = Math.min(compact ? 90 : 490, area.height);
+  if(compact&&!expandedSizes.has(window))expandedSizes.set(window,{width:bounds.width,height:bounds.height});
+  const saved=expandedSizes.get(window)??{width:468,height:490};
+  const width = Math.min(compact ? 368 : saved.width, area.width);
+  const height = Math.min(compact ? 90 : saved.height, area.height);
+  window.setMinimumSize(compact?300:Math.min(380,area.width),compact?90:Math.min(360,area.height));
+  window.setResizable(!compact);
+  if(!compact)expandedSizes.delete(window);
   window.setBounds({ x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)), y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)), width, height });
   return compact;
 });
 ipcMain.handle('window:pinned', (event, pinned) => {
   if (typeof pinned !== 'boolean') throw new Error('Invalid pin state');
-  trustedWindow(event).setAlwaysOnTop(pinned);
+  const owner=trustedWindow(event);owner.setAlwaysOnTop(pinned);
+  if(owner===mainWindow)helpPanel?.setAlwaysOnTop(pinned);
   return pinned;
 });
 ipcMain.on('window:minimize', event => trustedWindow(event).minimize());
 ipcMain.on('window:close', event => trustedWindow(event).close());
+ipcMain.handle('window:session',(event,id)=>{
+  const owner=trustedWindow(event);if(owner!==mainWindow)throw new Error('Only the main window owns a session.');
+  if(id!==null&&(typeof id!=='string'||!/^[\w-]{1,80}$/.test(id)))throw new Error('Invalid session.');
+  if(closing)throw new Error('The app is closing.');
+  lastSession=id;
+});
+for(const method of ['status','request','ensure','openSettings']){
+  ipcMain.handle('permissions:'+method,(event,kind)=>{const owner=trustedWindow(event);if(owner!==mainWindow&&!(owner===helpPanel&&['status','ensure'].includes(method)))throw new Error('This window cannot manage device permissions.');return permissions[method](kind);});
+}
 ipcMain.handle('presage:status', event => { trustedWindow(event); return presage.status(); });
 ipcMain.handle('presage:start', event => { trustedWindow(event); return presage.start(event.sender); });
 ipcMain.handle('presage:stop', event => { trustedWindow(event); return presage.stop(); });
 ipcMain.handle('presage:frame', (event, frame) => { trustedWindow(event); return presage.frame(event.sender, frame); });
 ipcMain.handle('presage:idle', event => { trustedWindow(event); return powerMonitor.getSystemIdleTime(); });
-ipcMain.handle('help:session',(event,id)=>{trustedWindow(event);if(id!==null&&(typeof id!=='string'||!/^[\w-]{1,80}$/.test(id)))throw new Error('Invalid session.');if(helpSession!==id){closeHelpPanel();help.stop();}helpSession=id;return help.status();});
+ipcMain.handle('help:session',(event,id)=>{trustedWindow(event);if(id!==null&&(typeof id!=='string'||!/^[\w-]{1,80}$/.test(id)))throw new Error('Invalid session.');if(id)lastSession=id;if(helpSession!==id){notifier.reset();closeHelpPanel();help.stop();}helpSession=id;return help.status();});
 function activeHelp(event){const window=trustedWindow(event);if(!helpSession)throw new Error('Start a session manually first.');return window;}
+ipcMain.handle('help:notify',(event,checkin)=>{if(activeHelp(event)!==mainWindow)throw new Error('Only the session window sends check-ins.');return notifier.notify(checkin);});
 ipcMain.handle('help:status',event=>{
   trustedWindow(event);const status=help.status();
   // Counts and times only: never persist audio, transcripts, images, or keys.
@@ -123,19 +176,15 @@ ipcMain.handle('help:wake-audio',(event,data)=>{activeHelp(event);return help.wa
 ipcMain.handle('help:live-start',(event,context)=>{activeHelp(event);help.stopWake();help.startLive(value=>{if(!event.sender.isDestroyed())event.sender.send('help:event',value);},context);});
 ipcMain.handle('help:live-stop',event=>{trustedWindow(event);help.stopLive();});
 ipcMain.handle('help:send',(event,kind,data)=>{activeHelp(event);return help.send(kind,data);});
+const captureScreen=()=>require('./capture-screen.cjs').captureScreen({permissions,screen,desktopCapturer});
 ipcMain.handle('help:screen',async event=>{
-  activeHelp(event);const display=screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const sources=await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:1280,height:1280}});
-  const source=sources.find(s=>s.display_id===String(display.id));if(!source||source.thumbnail.isEmpty())throw new Error('Could not capture this display.');
-  return help.send('video',source.thumbnail.toJPEG(70).toString('base64'));
+  activeHelp(event);
+  return help.send('video',await captureScreen());
 });
 ipcMain.handle('help:snapshot',async event=>{
-  if(event.sender!==helpPanel?.webContents)activeHelp(event);
-  const display=screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const sources=await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:1280,height:1280}});
-  const source=sources.find(s=>s.display_id===String(display.id));
-  if(!source||source.thumbnail.isEmpty())throw new Error('Could not capture this display.');
-  return source.thumbnail.toJPEG(70).toString('base64');
+  const owner=trustedWindow(event);
+  if(owner!==helpPanel)activeHelp(event);
+  return captureScreen();
 });
 ipcMain.handle('google:open',async(event,value)=>{
   if(event.sender!==helpPanel?.webContents)trustedWindow(event);
@@ -152,12 +201,13 @@ app.whenReady().then(async () => {
   } else {
     const { createApp } = await import('../server/app.js');
     await new Promise((resolve, reject) => {
-      backend = createApp();
+      backend = createApp({googleAuthOptions:{getPort:()=>server.address().port}});
       server = backend.listen(0, '127.0.0.1', resolve);
       server.on('error', reject);
     });
     appUrl = 'http://127.0.0.1:' + server.address().port;
   }
+  installMediaPermissions(session.defaultSession,{origin:new URL(appUrl).origin,permissions,allowedContents:contents=>contents===mainWindow?.webContents||contents===helpPanel?.webContents});
   createWindow();
   powerMonitor.on('suspend', () => { help.stop();void presage.stop().catch(console.error); });
   app.on('activate', () => {
@@ -165,16 +215,15 @@ app.whenReady().then(async () => {
   });
 }).catch((error) => {
   console.error(error);
+  shutdownComplete=true;
+  dialog.showErrorBox('Jarvis could not start',error.message);
   app.quit();
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-let quitting = false;
 app.on('before-quit', event => {
-  if (quitting) return;
-  event.preventDefault(); quitting = true;
-  help.stop();globalShortcut.unregisterAll();
-  presage.stop().catch(console.error).finally(async () => { await backend?.locals.close(); server?.close(); app.quit(); });
+  if(shutdownComplete)return;
+  event.preventDefault();void closeApplication();
 });

@@ -17,9 +17,14 @@
     "build": "vite build",
     "start": "npm run build && electron .",
     "server": "node server/index.js",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "setup:attention": "node scripts/setup-attention.js",
+    "predev": "node scripts/check-macos.js",
+    "prestart": "node scripts/check-macos.js",
+    "check:macos": "node scripts/check-macos.js"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@smartspectra/node-sdk": "^3.3.0",
     "express": "^5.2.1",
     "pptxgenjs": "^4.0.1",

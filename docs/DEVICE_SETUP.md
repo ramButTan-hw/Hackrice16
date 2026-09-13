@@ -81,6 +81,26 @@ Optional verification:
 
 See [the wake-word guide](WAKE_WORD_SETUP.md) for detailed microphone troubleshooting. Without Python/wake setup, typing and the optional Listen button remain available.
 
+## Local attention tracking
+
+Run this on each device after `npm ci`:
+
+```powershell
+npm run setup:attention
+```
+
+It downloads the face/phone models and copies the installed MediaPipe runtime into ignored `public/attention-runtime/`. Rebuild after setup if using a built frontend. No attention API key is needed. Do not copy this runtime from a different dependency version; rerun setup after updating dependencies.
+
+During camera monitoring, **Local attention check-ins** is enabled by default. Look at your screen for about 10 seconds to calibrate. Sustained 3D head tilt of about 18 degrees from the calibrated screen position can trigger a neutral check-in after 30 seconds even when the phone is not visible. A visible phone supports a smaller 12-degree tilt. Sideways turns also count. The control displays the measured tilt for calibration. Brief glances reset the timer. After successful calibration, sustained face loss uses a separate 45-second out-of-view check; it does not claim the user is distracted. Missing camera frames still reset the timer. A phone simply sitting in view does not trigger it while your head is facing the calibrated screen position.
+
+The worker samples every two seconds and checks for phones about every six seconds. Camera frames remain local to this detector; only cue states, timestamps and check-in events reach the backend/session database. Presage's own camera processing remains separate. In demo mode the attention camera is real even though biometrics are synthetic. Gemini receives the textual cue as context when answering; it does not repeatedly inspect camera images.
+
+These are head-direction/phone-visibility heuristics, not eye-gaze measurement or proof of distraction. They can miss phones outside the frame or misread typing, reading paper, and a second monitor. Use Recalibrate after changing your normal screen position, or disable attention checks for those tasks. Clear face visibility and adequate lighting are needed. Before calibration, no face is unknown. After calibration, a face out of view can produce a neutral “still there?” check-in after 45 seconds. Pausing the camera pauses attention detection. Closing/stopping the session stops it.
+
+Check-ins respect breaks, existing conversations/check-ins, and a five-minute cooldown. Facing the screen again for 10 seconds rearms detection. Attention cues do not add fatigue points. The neutral opening uses a local template so it still appears without a Gemini review; your response uses the normal voice-input/text-answer flow.
+
+See [Google's face landmark guide](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/web_js) and [object detection guide](https://developers.google.com/edge/mediapipe/solutions/vision/object_detector/web_js) for model capabilities.
+
 ## 5. Configure Google Workspace
 
 In the Google Cloud project associated with your Desktop OAuth client:
@@ -92,7 +112,7 @@ In the Google Cloud project associated with your Desktop OAuth client:
 
 Run the app as shown below, open Jarvis's three-dot menu, select **Connect Google**, and finish browser consent on this device. A Gemini key alone cannot grant access to Google documents.
 
-For this setup, keep the development backend on port **3001**. The OAuth callback is `http://127.0.0.1:3001/oauth/google/callback`. Use `npm run dev` for the complete Google workflow: `npm start` currently uses a random embedded-server port that does not match the default OAuth callback. Changing `PORT` alone does not update the Vite proxy and development startup checks.
+For this setup, keep the development backend on port **3001**. The OAuth callback is `http://127.0.0.1:3001/oauth/google/callback`. `npm start` uses an embedded server and automatically binds Google OAuth to its actual loopback port. Changing `PORT` alone does not update the Vite proxy and development startup checks.
 
 Google tokens are held in backend memory: reconnect after a backend restart. The app accesses Jarvis-created items and its separate **Jarvis work sessions** calendar, not your entire existing Drive or personal calendar availability. See [Google Workspace setup](GOOGLE_WORKSPACE_SETUP.md) for the preview/confirmation flow and deck-edit limitations.
 
@@ -127,7 +147,7 @@ Screen capture uses the display under your cursor. Keep the relevant material vi
 
 ## 7. Restarting and updating
 
-Stop the development terminal with **Ctrl+C** before starting another copy. After a code update, run `npm ci` if dependencies changed, then `npm run dev`. Restart the whole development process after `.env` or Electron/preload changes. Avoid running a second backend alongside `npm run dev`.
+Close the main desktop window first: Jarvis saves the active session as ended before camera cleanup and quitting. Camera shutdown is bounded so a stalled SDK cannot leave the session timer active. Minimizing, collapsing, or closing just the companion panel keeps the session active. If saving fails, the app stays open and asks you to retry. Force-killing the process or a power loss cannot run this graceful shutdown. Then stop any remaining development terminal with **Ctrl+C** before starting another copy. After a code update, run `npm ci` if dependencies changed, then `npm run dev`. Restart the whole development process after `.env` or Electron/preload changes. Avoid running a second backend alongside `npm run dev`.
 
 Backend-only development restart command: `npm run dev:server` (use only when your frontend/Electron are being managed separately). Google reconnect is required after the API restarts, including automatic restarts from its file watcher.
 
@@ -167,3 +187,5 @@ For camera startup diagnostics, `node scripts/diagnose-presage.cjs` uses synthet
 The wake installer supports `python3.12 scripts/setup-wake.py` and a `data/wake-env/bin/python` environment on Unix. Electron camera/microphone/screen permissions and the native Presage SDK still need verification on those platforms. This guide does not claim end-to-end support outside Windows.
 
 There is no configured signed installer/package workflow. Another device currently runs from source using Node/npm and the setup above.
+
+See [macOS setup and acceptance tests](MACOS_SETUP.md) for the Apple Silicon permission flow.
