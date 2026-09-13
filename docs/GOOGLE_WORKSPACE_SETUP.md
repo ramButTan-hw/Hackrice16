@@ -35,7 +35,9 @@ Decks use a consistent 16:9 layout with green, blue, or ivory themes, editable h
 
 ## Access and memory
 
-The app requests identity/email, `drive.file`, and `calendar.app.created` scopes. It works with documents and a calendar it creates; it does not browse your existing Drive or check availability in your personal calendar. Edits require a known Jarvis-created item.
+The app requests identity/email, `drive.file`, `calendar.app.created`, and `calendar.events.freebusy` scopes. It works with documents and a calendar it creates; it does not browse your existing Drive. The Planner can check busy times on your primary calendar and the Jarvis work sessions calendar. Reconnect Google after this upgrade and grant the availability permission. Other calendars are not checked. Document and chat calendar edits require a known Jarvis-created item.
+
+Click Planner to open its separate desktop window. Save a suggested block, then click Add to Google Calendar to send only its title and times to Jarvis work sessions. Linked plans offer Open in Google; manage event changes there. Google edits are not imported into the local plan. Remove from Jarvis only keeps the Google event. Closing the planner does not end a work session.
 
 OAuth tokens stay in backend memory. Reconnect Google after restarting the backend. Disconnect clears the local connection; revoke the app in your Google account settings to remove Google's authorization too.
 
@@ -66,3 +68,5 @@ Say “Edit the last presentation: make slide 2 shorter and switch to the blue t
 Enable **Google Slides API** as well as Drive API to let Jarvis read current slide content, particularly decks made before this update. No additional OAuth scope is needed. Deck outlines and generated slide images now persist in ignored local `data/google-workspace.json` so later edits can retain illustrations. Do not delete this file if you want to retain the app's deck context. Previews still expire and disappear on restart.
 
 When asking for images in a deck, Jarvis generates them into the preview before confirmation. Each preview shows the number of attached images. An image generated separately in chat can be inserted with **Add to a slide…** when a slide preview is open. Revising a preview keeps images with unchanged illustration prompts; changing a prompt means generating a replacement. Illustrations are embedded in the uploaded presentation, not linked to publicly hosted images.
+
+On macOS, Open in Google supports both `calendar.google.com` and the `www.google.com/calendar/event` links returned by Calendar. If the browser cannot launch, the preview displays an error and a selectable link. Restart the desktop app after updating to load the new link handler and voice-panel planner controls.

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen, powerMonitor, desktopCapturer, globalShortcut, shell, dialog, systemPreferences, session, Notification } = require('electron');
 const {finishSessionAndStop}=require('./end-session.cjs');
 const path = require('node:path');
+const {openGoogleLink}=require('./google-links.cjs');
 const {attachEdgeSnap}=require('./window-layout.cjs');
 const expandedSizes=new WeakMap();
 const { existsSync } = require('node:fs');
@@ -46,6 +47,8 @@ function createWindow() {
     height: 490,
     frame: false,
     transparent: true,
+    // The rounded renderer surface owns the border; native shadows outline the clear window bounds.
+    hasShadow: false,
     backgroundColor: '#00000000',
     resizable: true,
     minWidth: 380,
@@ -73,7 +76,7 @@ function createWindow() {
   });
   window.loadURL(appUrl);
   globalShortcut.register('CommandOrControl+Shift+Space',()=>{if(helpSession&&!window.isDestroyed()){window.show();window.webContents.send('help:event',{wake:true});}});
-  window.on('closed',()=>{appearanceWindow?.destroy();closeHelpPanel();help.stop();helpSession=null;globalShortcut.unregisterAll();});
+  window.on('closed',()=>{plannerWindow?.destroy();appearanceWindow?.destroy();closeHelpPanel();help.stop();helpSession=null;globalShortcut.unregisterAll();});
   window.webContents.on('did-start-loading',()=>{help.stop();helpSession=null;});
   window.on('closed', () => { void presage.stop().catch(console.error); });
   window.webContents.on('render-process-gone', () => { help.stop();helpSession=null;void presage.stop().catch(console.error); });
@@ -90,7 +93,7 @@ ipcMain.handle('help:panel',(event,state)=>{
   if(!helpPanel){
     const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     const width=Math.min(440,area.width-24),height=Math.min(440,area.height-24);
-    helpPanel=new BrowserWindow({width,height,x:area.x+area.width-width-18,y:area.y+24,show:false,frame:false,transparent:true,resizable:true,minWidth:360,minHeight:320,maximizable:false,fullscreenable:false,alwaysOnTop:mainWindow?.isAlwaysOnTop()??true,skipTaskbar:true,title:'Companion voice',autoHideMenuBar:true,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,preload:path.join(__dirname,'help-panel-preload.cjs')}});
+    helpPanel=new BrowserWindow({width,height,x:area.x+area.width-width-18,y:area.y+24,show:false,frame:false,transparent:true,hasShadow:false,resizable:true,minWidth:360,minHeight:320,maximizable:false,fullscreenable:false,alwaysOnTop:mainWindow?.isAlwaysOnTop()??true,skipTaskbar:true,title:'Companion voice',autoHideMenuBar:true,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,preload:path.join(__dirname,'help-panel-preload.cjs')}});
     attachEdgeSnap(helpPanel,screen);
     helpPanel.once('ready-to-show',()=>helpPanel?.showInactive());
     helpPanel.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -113,6 +116,19 @@ function trustedWindow(event) {
     || new URL(event.senderFrame.url).origin !== new URL(appUrl).origin) throw new Error('Untrusted window');
   return window;
 }
+let plannerWindow=null;
+ipcMain.handle('window:planner', event => {
+  const owner = trustedWindow(event);
+  if (owner !== mainWindow && owner !== helpPanel) throw new Error('Only Jarvis windows can open the planner.');
+  if (plannerWindow) { if (plannerWindow.isMinimized()) plannerWindow.restore(); plannerWindow.show(); plannerWindow.focus(); return; }
+  const area = screen.getDisplayMatching(owner.getBounds()).workArea;
+  plannerWindow = new BrowserWindow({ width: Math.min(1120, area.width), height: Math.min(820, area.height), minWidth: Math.min(400, area.width), minHeight: Math.min(420, area.height), title: 'Jarvis Planner', frame: false, transparent: true, hasShadow: false, maximizable: false, fullscreenable: false, autoHideMenuBar: true, backgroundColor: '#00000000', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'planner-preload.cjs') } });
+  attachEdgeSnap(plannerWindow,screen);
+  plannerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  plannerWindow.webContents.on('will-navigate', event => event.preventDefault());
+  plannerWindow.on('closed', () => { plannerWindow = null; });
+  plannerWindow.loadURL(appUrl + '/?planner-window=1');
+});
 let appearanceWindow=null;
 ipcMain.handle('window:appearance',event=>{
   const owner=trustedWindow(event);
@@ -186,12 +202,17 @@ ipcMain.handle('help:snapshot',async event=>{
   if(owner!==helpPanel)activeHelp(event);
   return captureScreen();
 });
+ipcMain.handle('browser:open',async(event,value)=>{
+  const owner=trustedWindow(event);
+  if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can open websites.');
+  const {websiteUrl}=await import('../shared/website-request.js');
+  const url=websiteUrl(value);
+  try{await shell.openExternal(url,{activate:true});}
+  catch{throw new Error('Could not open your browser. Check your default browser and try again.');}
+});
 ipcMain.handle('google:open',async(event,value)=>{
-  if(event.sender!==helpPanel?.webContents)trustedWindow(event);
-  if(typeof value!=='string'||value.length>10000)throw new Error('Invalid Google link.');
-  const url=new URL(value);
-  if(url.protocol!=='https:'||url.username||url.password||!((url.hostname==='accounts.google.com'&&url.pathname==='/o/oauth2/v2/auth')||(url.hostname==='docs.google.com'&&(url.pathname.startsWith('/document/d/')||url.pathname.startsWith('/presentation/d/')))||(url.hostname==='calendar.google.com'&&url.pathname.startsWith('/calendar/'))))throw new Error('Only Google sign-in, Docs, and Calendar links can be opened.');
-  await shell.openExternal(url.href);
+  trustedWindow(event);
+  await openGoogleLink(value,shell);
 });
 ipcMain.handle('help:reveal',event=>{const window=activeHelp(event);window.show();window.flashFrame(true);});
 

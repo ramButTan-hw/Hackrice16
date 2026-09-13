@@ -67,8 +67,12 @@
 :root.desktop .content::-webkit-scrollbar { display: block; width: 4px; }
 :root.desktop .content::-webkit-scrollbar-thumb { border-radius: 4px; background: rgb(var(--accent-rgb) / .22); }
 
-/* Keep resizing affordances outside draggable title areas. */
-.desktop .glass-shell:not(.compact)::after, .voice-overlay .voice-window::after { content: ''; position: absolute; right: 7px; bottom: 7px; width: 9px; height: 9px; border-right: 2px solid rgb(var(--accent-rgb) / .3); border-bottom: 2px solid rgb(var(--accent-rgb) / .3); border-radius: 0 0 3px 0; pointer-events: none; }
+/* Keep the frame inside the rounded surface, without a clipped outer shadow
+   or a decorative corner mark that looks like a misaligned resize control. */
+.desktop .glass-shell,
+.voice-overlay .voice-window {
+  box-shadow: inset 0 1px 0 rgb(var(--accent-rgb) / .23);
+}
 @media (min-width: 560px) { .camera-checkin video { height: 200px; } .ai-empty { min-height: 180px; } }
 
 /* Session landing surface: a clear task entry and a quieter frame. */

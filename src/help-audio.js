@@ -1,20 +1,36 @@
 export async function openMicrophone(onSamples,onFailure=()=>{}){
   await globalThis.devicePermissions?.ensure('microphone');
-  const context=new AudioContext({sampleRate:16000});let stream;
+  const context=new AudioContext({sampleRate:16000});
+  let stream,node,source,mute,closing;
   let handler=onSamples,closed=false;
+  // Wake detection, effect cleanup and device failure can all release the same mic.
+  // Stop capture synchronously; share one handled promise for context shutdown.
+  function close(){
+    if(closed)return closing??Promise.resolve();
+    closed=true;
+    context.onstatechange=null;
+    if(node){node.port.onmessage=null;node.onprocessorerror=null;}
+    for(const part of [node,source,mute]){try{part?.disconnect();}catch{}}
+    for(const track of stream?.getTracks()??[]){track.onended=null;try{track.stop();}catch{}}
+    closing=(async()=>{try{if(context.state!=='closed')await context.close();}catch{
+      // The browser may close the context between the state check and close().
+      // Teardown must not reject or replace the original setup error.
+    }})();
+    return closing;
+  }
   try{
     await context.resume();
     if(context.sampleRate!==16000)throw new Error('This audio device did not accept 16 kHz input. Try another microphone.');
     stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
     await context.audioWorklet.addModule('/help-audio.js');
-    const node=new AudioWorkletNode(context,'help-audio'),source=context.createMediaStreamSource(stream),mute=context.createGain();mute.gain.value=0;source.connect(node);node.connect(mute);mute.connect(context.destination);
-    node.port.onmessage=e=>handler(Int16Array.from(e.data,v=>Math.max(-32768,Math.min(32767,v*32768))));
-    node.onprocessorerror=()=>onFailure(new Error('Microphone audio processing stopped. Reconnect voice.'));
+    node=new AudioWorkletNode(context,'help-audio');source=context.createMediaStreamSource(stream);mute=context.createGain();mute.gain.value=0;source.connect(node);node.connect(mute);mute.connect(context.destination);
+    node.port.onmessage=e=>{if(!closed)handler(Int16Array.from(e.data,v=>Math.max(-32768,Math.min(32767,v*32768))));};
+    node.onprocessorerror=()=>{if(!closed)onFailure(new Error('Microphone audio processing stopped. Reconnect voice.'));};
     for(const track of stream.getAudioTracks())track.onended=()=>{if(!closed)onFailure(new Error('Microphone disconnected. Reconnect voice.'));};
-    const resume=()=>{if(!closed&&context.state==='suspended')void context.resume().catch(()=>onFailure(new Error('Microphone paused. Reconnect voice.')));};
+    const resume=()=>{if(!closed&&context.state==='suspended')void context.resume().catch(()=>{if(!closed)onFailure(new Error('Microphone paused. Reconnect voice.'));});};
     context.onstatechange=resume;
-    return {context,setHandler(next){handler=next;},close(){closed=true;context.onstatechange=null;node.port.onmessage=null;node.onprocessorerror=null;node.disconnect();source.disconnect();stream.getTracks().forEach(t=>{t.onended=null;t.stop();});void context.close();}};
-  }catch(e){stream?.getTracks().forEach(t=>t.stop());await context.close();throw e;}
+    return {context,setHandler(next){handler=next;},close};
+  }catch(e){await close();throw e;}
 }
 export function pcmBase64(pcm){const bytes=new Uint8Array(pcm.length*2),view=new DataView(bytes.buffer);for(let i=0;i<pcm.length;i++)view.setInt16(i*2,pcm[i],true);return btoa(String.fromCharCode(...bytes));}
 export function livePlayback(context){let next=0;const sources=new Set();return {

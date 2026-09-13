@@ -1,3 +1,5 @@
+import { plannerCalendar } from './planner-calendar.js';
+import { plannerService } from './planner.js';
 import {attentionSample} from './attention.js';
 import {generateImage} from './image-generation.js';
 import express from 'express';
@@ -18,6 +20,7 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
   const memory=memoryService();
   const google=googleAuth(googleAuthOptions),workspace=googleWorkspace({auth:google});
   const sessions = sessionService(repository, now);
+  const planner = plannerService(repository, now, plannerCalendar({ auth: google, workspace }));
   const monitor = monitoringService({ sessions, now, ...monitorOptions });
   app.locals.close = async () => { await monitor.close(); repository.close(); };
   app.disable('x-powered-by');
@@ -80,6 +83,12 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
     try { res.json(await generateReply(req.body, { sessions, memory })); }
     finally { chatPending = false; }
   });
+  app.get('/api/analytics/patterns', async (req, res) => res.json(await planner.patterns(req.query.timeZone || 'UTC')));
+  app.get('/api/plans', async (_req, res) => res.json(await planner.list()));
+  app.post('/api/plans/suggest', async (req, res) => res.json(await planner.suggest(req.body || {})));
+  app.post('/api/plans', async (req, res) => res.status(201).json(await planner.create(req.body)));
+  app.post('/api/plans/:id/google', async (req, res) => res.json(await planner.publish(req.params.id)));
+  app.delete('/api/plans/:id', async (req, res) => res.json(await planner.remove(req.params.id)));
   app.get('/api/sessions', async (_req, res) => res.json(await sessions.list()));
   app.post('/api/sessions', async (req, res) => {const s=await sessions.start(req.body);await monitor.configure(s.id,{enabled:true,voice:false});res.status(201).json(await sessions.get(s.id));});
   app.post('/api/sessions/:id/attention',async(req,res)=>{const s=await sessions.update(req.params.id,s=>attentionSample(s,req.body,now()));res.json(s.attention);});

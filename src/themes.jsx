@@ -44,7 +44,8 @@ export function ThemePicker({ settings, onChange }) {
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
-  if(window.companionWindow?.appearance)return <button type="button" className="icon-button" aria-label="Customize theme" title="Customize theme" onClick={()=>window.companionWindow.appearance()}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none"/></svg></button>;
+  const openAppearance=window.companionWindow?.appearance??window.plannerWindow?.appearance;
+  if(openAppearance)return <button type="button" className="icon-button" aria-label="Customize theme" title="Customize theme" onClick={()=>openAppearance()}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none"/></svg></button>;
   return <details className="theme-picker" ref={panel} onKeyDown={event => {
     if (event.key === 'Escape') { panel.current.open = false; panel.current.querySelector('summary').focus(); }
   }}>
