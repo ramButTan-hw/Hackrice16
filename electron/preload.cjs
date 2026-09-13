@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('helpBridge',{
+  notify:checkin=>ipcRenderer.invoke('help:notify',checkin),
   openGoogle:url=>ipcRenderer.invoke('google:open',url),
   snapshot:()=>ipcRenderer.invoke('help:snapshot'),
   status:()=>ipcRenderer.invoke('help:status'),
@@ -12,6 +13,7 @@ contextBridge.exposeInMainWorld('helpBridge',{
   subscribe:callback=>{const listener=(_e,data)=>callback(data);ipcRenderer.on('help:event',listener);return()=>ipcRenderer.removeListener('help:event',listener);},
 });
 contextBridge.exposeInMainWorld('companionWindow', {
+  setSession:id=>ipcRenderer.invoke('window:session',id),
   appearance:()=>ipcRenderer.invoke('window:appearance'),
   setCompact: value => ipcRenderer.invoke('window:compact', value),
   setPinned: value => ipcRenderer.invoke('window:pinned', value),
@@ -30,3 +32,5 @@ contextBridge.exposeInMainWorld('presage', {
     return () => ipcRenderer.removeListener('presage:event', listener);
   },
 });
+
+contextBridge.exposeInMainWorld('devicePermissions',{status:()=>ipcRenderer.invoke('permissions:status'),request:kind=>ipcRenderer.invoke('permissions:request',kind),ensure:kind=>ipcRenderer.invoke('permissions:ensure',kind),openSettings:kind=>ipcRenderer.invoke('permissions:openSettings',kind)});

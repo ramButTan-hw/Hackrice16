@@ -1,3 +1,4 @@
+import {attentionSample} from './attention.js';
 import {generateImage} from './image-generation.js';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +13,10 @@ import { memoryService } from './memory.js';
 import {googleAuth} from './google-auth.js';
 import {googleWorkspace} from './google-workspace.js';
 
-export function createApp({ repository = configuredRepository(), now = Date.now, monitorOptions = {} } = {}) {
+export function createApp({ repository = configuredRepository(), now = Date.now, monitorOptions = {}, googleAuthOptions = {} } = {}) {
   const app = express();
   const memory=memoryService();
-  const google=googleAuth(),workspace=googleWorkspace({auth:google});
+  const google=googleAuth(googleAuthOptions),workspace=googleWorkspace({auth:google});
   const sessions = sessionService(repository, now);
   const monitor = monitoringService({ sessions, now, ...monitorOptions });
   app.locals.close = async () => { await monitor.close(); repository.close(); };
@@ -81,6 +82,7 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
   });
   app.get('/api/sessions', async (_req, res) => res.json(await sessions.list()));
   app.post('/api/sessions', async (req, res) => {const s=await sessions.start(req.body);await monitor.configure(s.id,{enabled:true,voice:false});res.status(201).json(await sessions.get(s.id));});
+  app.post('/api/sessions/:id/attention',async(req,res)=>{const s=await sessions.update(req.params.id,s=>attentionSample(s,req.body,now()));res.json(s.attention);});
   app.get('/api/sessions/:id/assistance',async(req,res)=>{const s=await sessions.get(req.params.id);res.json(assistanceState(s));});
   app.post('/api/sessions/:id/assistance',async(req,res)=>{const s=await sessions.update(req.params.id,s=>{answerCheckin(s,req.body,now());appendEvent(s,now(),'assistance','answer',{answer:req.body.answer,score:s.assistance.score});});res.json(s.assistance);});
   app.get('/api/sessions/:id', async (req, res) => res.json(await sessions.get(req.params.id)));
@@ -101,7 +103,9 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
     res.json({ sessionId: s.id, retainedLimit: 180, totalEvents: s.eventSequence ?? 0, events: s.events ?? [] });
   });
   app.post('/api/sessions/:id/interventions', async (req, res) => res.status(201).json(await sessions.intervene(req.params.id, req.body)));
-  app.post('/api/sessions/:id/end', async (req, res) => { await monitor.stop(req.params.id); res.json(await sessions.end(req.params.id)); });
+  app.post('/api/sessions/:id/end', async (req, res) => { const reason=req.body?.reason;if(reason!==undefined&&reason!=='break')return res.status(400).json({error:'Invalid session end reason.'});
+    if(reason==='break'){const current=await sessions.get(req.params.id);if(current.status==='ended')return res.json(current);}
+    await monitor.stop(req.params.id);try{res.json(await sessions.end(req.params.id,reason));}catch(error){if(reason==='break'&&error.status===409)return res.json(await sessions.get(req.params.id));throw error;} });
   app.get('/api/sessions/:id/summary', async (req, res) => res.json(await sessions.summary(req.params.id)));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
   app.use(express.static(fileURLToPath(new URL('../dist', import.meta.url))));

@@ -6,3 +6,5 @@ contextBridge.exposeInMainWorld('helpPanel',{
   action:action=>ipcRenderer.send('help:panel-action',action),
   subscribe:callback=>{const listener=(_event,state)=>callback(state);ipcRenderer.on('help:panel-state',listener);return()=>ipcRenderer.removeListener('help:panel-state',listener);}
 });
+
+contextBridge.exposeInMainWorld('devicePermissions',{status:()=>ipcRenderer.invoke('permissions:status'),ensure:kind=>ipcRenderer.invoke('permissions:ensure',kind)});

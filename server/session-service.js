@@ -53,7 +53,7 @@ export function sessionService(repository, now = Date.now) {
         s.interventions.push({ id: randomUUID(), timestamp: now(), text: message, provider: body.provider, state: deriveState(s, now()).state });
       });
     },
-    end(id) { return change(id, s => { s.status = 'ended'; s.endedAt = now(); if (s.monitor) s.monitor.enabled = false; }); },
+    end(id, reason) { if(reason!==undefined&&reason!=='break')fail('Invalid session end reason.');return change(id, s => { s.status = 'ended'; s.endedAt = now(); if(reason)s.endReason=reason;if(s.assistance){s.assistance.checkin=null;s.assistance.helpUntil=null;}if (s.monitor) s.monitor.enabled = false; }); },
     async summary(id) { return summarize(await get(id), now()); },
   };
 }

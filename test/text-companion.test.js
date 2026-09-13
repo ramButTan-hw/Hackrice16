@@ -45,7 +45,7 @@ test('stream survives split SSE frames, includes screenshot and check-in, and me
   assert.equal(request.contents[0].parts[1].inlineData.data,'YWJj');assert.match(request.systemInstruction.parts[0].text,/How is it going/);
 });
 test('natural feeling tool updates the break score and always produces visible text',async()=>{
-  const session={goal:'Study',source:'demo',startedAt:Date.now()};let updates=0;
+  const session={status:'active',goal:'Study',source:'demo',startedAt:Date.now()};let updates=0;
   const reply=await generateReply({sessionId:'s1',memory:false,messages:[{role:'user',text:'I feel worn out'}]},{apiKey:'test',sessions:{get:async()=>session,state:async()=>({}),update:async(_id,fn)=>{updates++;fn(session);}},onText:()=>{},fetcher:async()=>sse([{functionCall:{name:'report_feeling',args:{feeling:'tired'}}}])});
   assert.equal(updates,1);assert.equal(session.assistance.feeling,'tired');assert.equal(session.assistance.score,3);assert.match(reply.text,/break/);
 });

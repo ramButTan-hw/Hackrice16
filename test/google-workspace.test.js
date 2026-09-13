@@ -20,6 +20,19 @@ test('Google OAuth binds callback state, uses PKCE, and never exposes tokens',as
   auth.disconnect();assert.equal(auth.status().connected,false);
 });
 
+test('embedded-server OAuth uses the bound port and preserves it for token exchange',async()=>{
+  let port=54321,tokenBody;
+  const auth=googleAuth({env:{GOOGLE_CLIENT_ID:'test-client',PORT:'3001'},getPort:()=>port,fetcher:async(url,options)=>{
+    if(url.endsWith('/token')){tokenBody=options.body;return Response.json({access_token:'test',scope:GOOGLE_SCOPES.join(' ')});}
+    return Response.json({sub:'test-user'});
+  }});
+  const url=new URL(auth.begin().url);
+  assert.equal(url.searchParams.get('redirect_uri'),'http://127.0.0.1:54321/oauth/google/callback');
+  port=54322;
+  await auth.callback({state:url.searchParams.get('state'),code:'test-code'});
+  assert.equal(tokenBody.get('redirect_uri'),url.searchParams.get('redirect_uri'));
+});
+
 async function fixture(t,{failUpdate=false}={}){
   const dir=await mkdtemp(join(tmpdir(),'jarvis-google-'));t.after(async()=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir())));await rm(dir,{recursive:true,force:true});});
   let account='user-1';const calls=[];

@@ -1,3 +1,4 @@
+import Attention from './Attention.jsx';
 import { useEffect, useRef, useState } from 'react';
 const bridge = window.presage;
 async function post(id, endpoint, body) {
@@ -36,6 +37,7 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     const version = ++generation.current;
     setStarting(true); setHint('Opening camera…');
     try {
+      await window.devicePermissions?.ensure('camera');
       const capture = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' } });
       if (version !== generation.current) { capture.getTracks().forEach(track => track.stop()); return; }
       stream.current = capture; video.current.srcObject = capture;
@@ -127,25 +129,28 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     setVoice(value);
     if (running) try { await post(sessionId, 'monitor', { enabled: true, voice: value }); } catch (error) { setHint(error.message); }
   }
+  if(!enabled)return null;
   const decision = monitor?.decisions?.at(-1);
   return <section className="camera-checkin" aria-label="Continuous monitoring">
     <div className="camera-heading"><span className="eyebrow">LIVE MONITORING</span><span>{running ? 'Camera on' : 'Camera off'}</span></div>
     <video ref={video} muted playsInline hidden={!running && !starting} aria-label="Camera preview"/>
     {running && cameraInfo && <small className="camera-diagnostics">Full frame · {cameraInfo.width} × {cameraInfo.height}{cameraInfo.fps !== null ? ` · ${cameraInfo.fps} fps sent` : ''}</small>}
     <p role="status">{!bridge ? 'Camera monitoring is available in the desktop app.' : !enabled ? 'Start a session to begin continuous monitoring.' : hint}</p>
-    <div className="camera-actions">{running || starting
+    {enabled&&<Attention video={video} sessionId={sessionId} running={running}/>}
+    {enabled&&<div className="camera-actions">{running || starting
       ? <button type="button" onClick={() => { setHint('Camera and automatic analysis paused.'); void stop(); }}>Pause monitoring</button>
       : <button type="button" disabled={!bridge || !enabled} onClick={start}>Resume monitoring</button>}
-      <span>Check-ins open Gemini voice</span></div>
+      <span>Check-ins with Jarvis</span></div>}
     {enabled && <div className="monitor-status">
       <p>{monitor?.error || labels[monitor?.status] || 'Preparing automatic analysis…'}</p>
       {monitor?.waitReason && <p>{monitor.waitReason}</p>}
       {connectionError && <p role="alert">{connectionError}</p>}
       {logError && <p role="alert">{logError}</p>}
-      <p>Open the Log tab for returned Presage values and analysis details.</p>
+      <details className="diagnostic-details"><summary>Analysis details</summary><p>Returned readings are available in the Log tab.</p>
       <span>Gemini analyses: {monitor?.calls ?? 0} / {monitor?.budget ?? 6}</span>
       {monitor?.analysis && <span> · Local analysis: {monitor.analysis.validSampleCount} reliable samples / last 60s</span>}
       {decision && <p>{decision.delivered ? 'Suggestion delivered' : 'No interruption'} · {decision.reason}</p>}
+      </details>
       {monitor?.audio?.audio && <audio ref={audio} key={monitor.audio.interventionId} controls autoPlay={voice && running} src={monitor.audio.audio} aria-label="Companion suggestion"/>}
       {monitor?.audio?.audioError && <p>{monitor.audio.audioError}</p>}
     </div>}
