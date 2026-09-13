@@ -1,6 +1,6 @@
 // Only bounded, reviewable input actions can cross the desktop bridge.
 exports.validateStep = function (value) {
-  const fail=()=>{throw new Error('Jarvis could not identify a safe next step. Try a more specific task.');};
+  const fail=()=>{throw new Error('Acumen could not identify a safe next step. Try a more specific task.');};
   if(!value||!['click','double_click','type','scroll','manual','done','open_website','open_app'].includes(value.action))fail();
   if(typeof value.instruction!=='string'||!value.instruction.trim()||value.instruction.length>600)fail();
   const step={action:value.action,instruction:value.instruction.trim()};

@@ -1,4 +1,4 @@
-// Only destinations that Jarvis creates or uses for Google sign-in may leave the app.
+// Only destinations that Acumen creates or uses for Google sign-in may leave the app.
 function googleLink(value) {
   if (typeof value !== 'string' || value.length > 10000) throw new Error('Invalid Google link.');
   let url;

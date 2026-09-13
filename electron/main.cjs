@@ -1,4 +1,8 @@
 const { app, BrowserWindow, ipcMain, screen, powerMonitor, desktopCapturer, globalShortcut, shell, dialog, systemPreferences, session, Notification } = require('electron');
+// Keep existing sessions, preferences, and OAuth state across the display-name change.
+const existingUserData=app.getPath('userData');
+app.setName('Acumen');
+app.setPath('userData',existingUserData);
 const {finishSessionAndStop}=require('./end-session.cjs');
 const path = require('node:path');
 const {openGoogleLink}=require('./google-links.cjs');
@@ -12,7 +16,8 @@ async function launchTarget(step){
 const { existsSync } = require('node:fs');
 // Source launches must not depend on the terminal/Finder working directory.
 if (!app.isPackaged) process.chdir(path.join(__dirname, '..'));
-if (existsSync('.env')) process.loadEnvFile('.env');
+const rehearsal = process.argv.includes('--rehearsal') && process.env.JARVIS_REHEARSAL === '1';
+if (!rehearsal && existsSync('.env')) process.loadEnvFile('.env');
 const presage = require('./presage.cjs').createPresage({ idle: () => powerMonitor.getSystemIdleTime() });
 const help = require('./help-runtime.cjs').createHelpRuntime();
 const {createPermissions,installMediaPermissions}=require('./permissions.cjs');
@@ -23,6 +28,11 @@ let server;
 let backend;
 let guide;
 let appUrl;
+function surfaceUrl(query = '') {
+  const url = new URL('/' + query, appUrl);
+  if (rehearsal) url.searchParams.set('rehearsal', '1');
+  return url.href;
+}
 let mainWindow=null,lastSession=null,closing=null,shutdownComplete=false;
 if(process.platform==='win32')app.setAppUserModelId(app.isPackaged?'com.jarvis.companion':process.execPath);
 const notifier=require('./checkin-notification.cjs').createCheckinNotifier({Notification,beep:()=>shell.beep(),flash:()=>mainWindow?.flashFrame(true),reveal:()=>{if(helpPanel&&!helpPanel.isDestroyed())helpPanel.show();else mainWindow?.show();},report:message=>console.warn(message)});
@@ -50,7 +60,7 @@ function closeApplication(){
 function createWindow() {
   const window = new BrowserWindow({
     width: 468,
-    height: 490,
+    height: rehearsal ? Math.min(720, screen.getPrimaryDisplay().workArea.height) : 490,
     frame: false,
     transparent: true,
     // The rounded renderer surface owns the border; native shadows outline the clear window bounds.
@@ -63,7 +73,7 @@ function createWindow() {
     maximizable: false,
     fullscreenable: false,
     autoHideMenuBar: true,
-    title: 'Session',
+    title: rehearsal ? 'Acumen rehearsal' : 'Acumen',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -80,7 +90,7 @@ function createWindow() {
   window.webContents.on('will-navigate', (event, url) => {
     if (new URL(url).origin !== new URL(appUrl).origin) event.preventDefault();
   });
-  window.loadURL(appUrl);
+  window.loadURL(surfaceUrl());
   globalShortcut.register('CommandOrControl+Shift+Space',()=>{if(helpSession&&!window.isDestroyed()){window.show();window.webContents.send('help:event',{wake:true});}});
   window.on('closed',()=>{for(const panel of widgetWindows.values())panel.destroy();plannerWindow?.destroy();appearanceWindow?.destroy();closeHelpPanel();help.stop();helpSession=null;globalShortcut.unregisterAll();});
   window.webContents.on('did-start-loading',()=>{help.stop();helpSession=null;});
@@ -106,7 +116,7 @@ ipcMain.handle('help:panel',(event,state)=>{
     helpPanel.webContents.on('will-navigate',e=>e.preventDefault());
     const panel=helpPanel;
     helpPanel.on('closed',()=>{if(helpPanel!==panel)return;helpPanel=null;panelState=null;if(helpOwner&&!helpOwner.isDestroyed())helpOwner.send('help:event',{panelAction:'close'});});
-    helpPanel.loadURL(appUrl+'/?help-window=1');
+    helpPanel.loadURL(surfaceUrl('?help-window=1'));
   }else helpPanel.webContents.send('help:panel-state',state);
 });
 ipcMain.handle('help:panel-ready',event=>{if(event.sender!==helpPanel?.webContents)throw new Error('Untrusted panel');return panelState;});
@@ -129,24 +139,24 @@ ipcMain.handle('window:widget',async(event,kind)=>{
   const existing=widgetWindows.get(kind);
   if(existing&&!existing.isDestroyed()){if(existing.isMinimized())existing.restore();existing.show();existing.focus();return;}
   const area=screen.getDisplayMatching(owner.getBounds()).workArea;
-  const panel=new BrowserWindow({width:Math.min(kind==='timer'?320:380,area.width),height:Math.min(kind==='timer'?290:540,area.height),minWidth:280,minHeight:kind==='timer'?260:300,frame:false,transparent:true,hasShadow:false,resizable:true,alwaysOnTop:true,maximizable:false,fullscreenable:false,title:'Jarvis '+kind,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,backgroundThrottling:false,preload:path.join(__dirname,'widget-preload.cjs')}});
+  const panel=new BrowserWindow({width:Math.min(kind==='timer'?320:380,area.width),height:Math.min(kind==='timer'?290:540,area.height),minWidth:280,minHeight:kind==='timer'?260:300,frame:false,transparent:true,hasShadow:false,resizable:true,alwaysOnTop:true,maximizable:false,fullscreenable:false,title:'Acumen '+kind,backgroundColor:'#00000000',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,backgroundThrottling:false,preload:path.join(__dirname,'widget-preload.cjs')}});
   widgetWindows.set(kind,panel);attachEdgeSnap(panel,screen);
   panel.webContents.setWindowOpenHandler(()=>({action:'deny'}));panel.webContents.on('will-navigate',e=>e.preventDefault());
   panel.on('closed',()=>widgetWindows.delete(kind));
-  await panel.loadURL(appUrl+'/?widget='+kind);
+  await panel.loadURL(surfaceUrl('?widget='+kind));
 });
 let plannerWindow=null;
 ipcMain.handle('window:planner', event => {
   const owner = trustedWindow(event);
-  if (owner !== mainWindow && owner !== helpPanel) throw new Error('Only Jarvis windows can open the planner.');
+  if (owner !== mainWindow && owner !== helpPanel) throw new Error('Only Acumen windows can open the planner.');
   if (plannerWindow) { if (plannerWindow.isMinimized()) plannerWindow.restore(); plannerWindow.show(); plannerWindow.focus(); return; }
   const area = screen.getDisplayMatching(owner.getBounds()).workArea;
-  plannerWindow = new BrowserWindow({ width: Math.min(1120, area.width), height: Math.min(820, area.height), minWidth: Math.min(400, area.width), minHeight: Math.min(420, area.height), title: 'Jarvis Planner', frame: false, transparent: true, hasShadow: false, maximizable: false, fullscreenable: false, autoHideMenuBar: true, backgroundColor: '#00000000', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'planner-preload.cjs') } });
+  plannerWindow = new BrowserWindow({ width: Math.min(1120, area.width), height: Math.min(820, area.height), minWidth: Math.min(400, area.width), minHeight: Math.min(420, area.height), title: 'Acumen Planner', frame: false, transparent: true, hasShadow: false, maximizable: false, fullscreenable: false, autoHideMenuBar: true, backgroundColor: '#00000000', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'planner-preload.cjs') } });
   attachEdgeSnap(plannerWindow,screen);
   plannerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   plannerWindow.webContents.on('will-navigate', event => event.preventDefault());
   plannerWindow.on('closed', () => { plannerWindow = null; });
-  plannerWindow.loadURL(appUrl + '/?planner-window=1');
+  plannerWindow.loadURL(surfaceUrl('?planner-window=1'));
 });
 let appearanceWindow=null;
 ipcMain.handle('window:appearance',event=>{
@@ -156,7 +166,7 @@ ipcMain.handle('window:appearance',event=>{
   appearanceWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   appearanceWindow.webContents.on('will-navigate',event=>event.preventDefault());
   appearanceWindow.on('closed',()=>{appearanceWindow=null;});
-  appearanceWindow.loadURL(appUrl+'/?appearance-window=1');
+  appearanceWindow.loadURL(surfaceUrl('?appearance-window=1'));
 });
 ipcMain.handle('window:compact', (event, compact) => {
   if (typeof compact !== 'boolean') throw new Error('Invalid window mode');
@@ -191,7 +201,7 @@ for(const method of ['status','request','ensure','openSettings']){
   ipcMain.handle('permissions:'+method,(event,kind)=>{const owner=trustedWindow(event);if(owner!==mainWindow&&!(owner===helpPanel&&['status','ensure'].includes(method)))throw new Error('This window cannot manage device permissions.');return permissions[method](kind);});
 }
 ipcMain.handle('presage:status', event => { trustedWindow(event); return presage.status(); });
-ipcMain.handle('presage:start', event => { trustedWindow(event); return presage.start(event.sender); });
+ipcMain.handle('presage:start', (event, options) => { trustedWindow(event); return presage.start(event.sender, options); });
 ipcMain.handle('presage:stop', event => { trustedWindow(event); return presage.stop(); });
 ipcMain.handle('presage:frame', (event, frame) => { trustedWindow(event); return presage.frame(event.sender, frame); });
 ipcMain.handle('presage:idle', event => { trustedWindow(event); return powerMonitor.getSystemIdleTime(); });
@@ -222,12 +232,12 @@ ipcMain.handle('help:snapshot',async event=>{
   return captureScreen();
 });
 ipcMain.handle('app:open',async(event,name)=>{
- const owner=trustedWindow(event);if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can open apps.');
+ const owner=trustedWindow(event);if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Acumen chat can open apps.');
  return launchApp(name);
 });
 ipcMain.handle('browser:open',async(event,value)=>{
   const owner=trustedWindow(event);
-  if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can open websites.');
+  if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Acumen chat can open websites.');
   const {websiteUrl}=await import('../shared/website-request.js');
   const url=websiteUrl(value);
   try{await shell.openExternal(url,{activate:true});}
@@ -240,7 +250,7 @@ ipcMain.handle('google:open',async(event,value)=>{
 ipcMain.handle('help:reveal',event=>{const window=activeHelp(event);window.show();window.flashFrame(true);});
 
 app.whenReady().then(async () => {
-  guide=require('./guide.cjs').createGuide({app,BrowserWindow,ipcMain,screen,desktopCapturer,globalShortcut,systemPreferences,shell,permissions,launchTarget,apiUrl:()=>development?'http://127.0.0.1:3001':appUrl,authorize:event=>{const owner=trustedWindow(event);if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Jarvis chat can start guidance.');}});
+  guide=require('./guide.cjs').createGuide({app,BrowserWindow,ipcMain,screen,desktopCapturer,globalShortcut,systemPreferences,shell,permissions,launchTarget,apiUrl:()=>development?'http://127.0.0.1:3001':appUrl,authorize:event=>{const owner=trustedWindow(event);if(owner!==mainWindow&&owner!==helpPanel)throw new Error('Only Acumen chat can start guidance.');}});
   if (development) {
     appUrl = 'http://127.0.0.1:5173';
   } else {
@@ -263,7 +273,7 @@ app.whenReady().then(async () => {
       if(!response.ok)return;const timer=await response.json();
       if(timer.status==='completed'&&timer.endsAt&&timer.endsAt!==lastTimerAlert){
         lastTimerAlert=timer.endsAt;
-        if(Notification.isSupported())new Notification({title:'Jarvis · Timer complete',body:timer.title+' is finished. Take a moment before your next task.'}).show();
+        if(Notification.isSupported())new Notification({title:'Acumen · Timer complete',body:timer.title+' is finished. Take a moment before your next task.'}).show();
         shell.beep();widgetWindows.get('timer')?.flashFrame(true);
       }
     }catch{}finally{timerCheckPending=false;}
@@ -271,12 +281,12 @@ app.whenReady().then(async () => {
   app.once('will-quit',()=>clearInterval(timerWatch));
   powerMonitor.on('suspend', () => { help.stop();void presage.stop().catch(console.error); });
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!closing && !shutdownComplete && BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 }).catch((error) => {
   console.error(error);
   shutdownComplete=true;
-  dialog.showErrorBox('Jarvis could not start',error.message);
+  dialog.showErrorBox('Acumen could not start',error.message);
   app.quit();
 });
 

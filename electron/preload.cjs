@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('companionWindow', {
 });
 contextBridge.exposeInMainWorld('presage', {
   status: () => ipcRenderer.invoke('presage:status'),
-  start: () => ipcRenderer.invoke('presage:start'),
+  start: options => ipcRenderer.invoke('presage:start', options),
   stop: () => ipcRenderer.invoke('presage:stop'),
   frame: data => ipcRenderer.invoke('presage:frame', data),
   idle: () => ipcRenderer.invoke('presage:idle'),

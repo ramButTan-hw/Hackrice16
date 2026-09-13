@@ -2,6 +2,7 @@ import {openMicrophone} from '../src/help-audio.js';
 import {utterance} from '../src/utterance.js';
 import {guideListener} from '../src/guide-listener.js';
 let voiceEpoch=0,autoVoiceChecked=false,voiceNotice='';
+const progressLabels={preparing:'Preparing screen access and desktop controls…',reading:'Reading the current screen…',choosing:'Choosing the next step…',locating:'Locating the requested control…',checking_target:'Checking that the target is still in place…',acting:'Performing the approved action…',checking:'Checking the result on your screen…'};
 const $=id=>document.getElementById(id);let goal='';
 function voiceFeedback(message){voiceNotice=message;$('voice-feedback').hidden=!message;$('voice-feedback').textContent=message;}
 const listener=guideListener({
@@ -20,7 +21,7 @@ function render(state){
  $('goal').value=goal;
  $('task').hidden=Boolean(state.started);
  $('step').hidden=!state.started;
- $('instruction').textContent=state.busy?'Looking at your screen…':state.step?.instruction||'Ready for the next step.';
+ $('instruction').textContent=state.busy?(progressLabels[state.phase]||'Preparing the next step…'):state.step?.instruction||'Ready for the next step.';
  const action=state.step?.action;
  $('execute').hidden=state.busy||!['click','double_click','type','scroll','open_website','open_app'].includes(action)||!state.canExecute;
  $('execute').disabled=Boolean(state.executed||state.takeover);

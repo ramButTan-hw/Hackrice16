@@ -33,13 +33,13 @@ export function googleWorkspace({auth,path='data/google-workspace.json',now=Date
   async function persist(){await mkdir(dirname(path),{recursive:true});await writeFile(path+'.tmp',JSON.stringify(registry));await rename(path+'.tmp',path);}
   const exclusive=fn=>{const next=queue.then(fn);queue=next.catch(()=>{});return next;};
   async function owned(){await load();const owner=auth.status().accountId;if(!owner)fail('Connect Google first.',401);return {owner,state:registry.accounts[owner]??={documents:[],events:[],calendarId:null}};}
-  async function target(draft,state){const items=draft.kind==='append_doc'?state.documents:draft.kind==='update_slides'?(state.presentations??[]):state.events;const item=items.find(i=>i.id===draft.targetId);if(!item)fail('Select an item created by Jarvis in this Google account.',400);return item;}
+  async function target(draft,state){const items=draft.kind==='append_doc'?state.documents:draft.kind==='update_slides'?(state.presentations??[]):state.events;const item=items.find(i=>i.id===draft.targetId);if(!item)fail('Select an item created by Acumen in this Google account.',400);return item;}
   const view=p=>({id:p.id,...p.draft,expiresAt:p.expiresAt,status:p.status,result:p.result,error:p.error,images:p.images??{}});
   return {
     async plannerCalendarId(timeZone) { return exclusive(async () => {
       const { owner, state } = await owned();
       if (!state.calendarId && timeZone) {
-        const calendar = await auth.request(cal + '/calendars', 'POST', { summary: 'Jarvis work sessions', timeZone }, owner);
+        const calendar = await auth.request(cal + '/calendars', 'POST', { summary: 'Acumen work sessions', timeZone }, owner);
         if (!calendar.id) fail('Google did not return a calendar ID.', 502);
         state.calendarId = calendar.id; await persist();
       }
@@ -66,7 +66,7 @@ export function googleWorkspace({auth,path='data/google-workspace.json',now=Date
       (p.images??={})[index]=image;p.draft.slides[index].imagePrompt=field(prompt,1000,'image description');return view(p);
     },
     async readDeck(id){
-      const {owner,state}=await owned();const item=(state.presentations??[]).find(p=>p.id===id);if(!item)fail('Choose a Jarvis-created presentation.',404);
+      const {owner,state}=await owned();const item=(state.presentations??[]).find(p=>p.id===id);if(!item)fail('Choose a Acumen-created presentation.',404);
       const remote=await auth.request('https://slides.googleapis.com/v1/presentations/'+encodeURIComponent(id),undefined,undefined,owner);
       return {id,title:remote.title,slides:(remote.slides??[]).map(page=>({texts:(page.pageElements??[]).flatMap(e=>e.shape?.text?.textElements?.map(t=>t.textRun?.content??'')??[]).join('').slice(0,3000),hasImages:(page.pageElements??[]).some(e=>e.image)})),savedDraft:item.draft};
     },
@@ -77,7 +77,7 @@ export function googleWorkspace({auth,path='data/google-workspace.json',now=Date
       try{for(const [index,slide]of p.draft.slides.entries())if(slide.imagePrompt&&!p.images[index])p.images[index]=await imageGenerator(slide.imagePrompt);return view(p);}finally{p.generating=false;}
     },
     async execute(id,conversationId){return exclusive(async()=>{
-      const p=proposals.get(id);if(!p||p.conversationId!==conversationId)fail('This preview is unavailable. Ask Jarvis to prepare it again.',404);
+      const p=proposals.get(id);if(!p||p.conversationId!==conversationId)fail('This preview is unavailable. Ask Acumen to prepare it again.',404);
       const {owner,state}=await owned();if(p.accountId&&p.accountId!==owner)fail('Google account changed. Ask for a new preview.',409);p.accountId=owner;
       if(p.status==='done')return view(p);
       if(p.generating)fail('Wait for illustrations to finish.',409);
@@ -105,7 +105,7 @@ export function googleWorkspace({auth,path='data/google-workspace.json',now=Date
           await request(docs+'/'+encodeURIComponent(documentId)+':batchUpdate','POST',{requests,...(doc.revisionId?{writeControl:{requiredRevisionId:doc.revisionId}}:{})});
           if(!item)state.documents.push({...p.result,createdAt:now()});
         }else{
-          if(!state.calendarId){const calendar=await request(cal+'/calendars','POST',{summary:'Jarvis work sessions',description:'Work blocks created with Jarvis.',timeZone:d.timeZone});state.calendarId=calendar.id;if(!calendar.id)throw new Error('Google returned no calendar ID.');await persist();}
+          if(!state.calendarId){const calendar=await request(cal+'/calendars','POST',{summary:'Acumen work sessions',description:'Work blocks created with Acumen.',timeZone:d.timeZone});state.calendarId=calendar.id;if(!calendar.id)throw new Error('Google returned no calendar ID.');await persist();}
           const base=cal+'/calendars/'+encodeURIComponent(state.calendarId)+'/events';
           const event={summary:d.title,start:{dateTime:d.start,timeZone:d.timeZone},end:{dateTime:d.end,timeZone:d.timeZone}};
           let saved;

@@ -1,3 +1,6 @@
+import {responseStyle} from '../shared/response-style.js';
+import CheckinEvidence from './CheckinEvidence.jsx';
+import {rehearsal} from './rehearsal.js';
 import * as musicRequest from '../shared/music-request.js';
 import {googleOpenRequest,savedGoogleResult} from './google-open-request.js';
 import {prepareGoogleConfirmation} from './google-confirmation.js';
@@ -14,7 +17,7 @@ import {openMicrophone} from './help-audio.js';
 import {utterance} from './utterance.js';
 import {isDismissal} from './dismiss-intent.js';
 import {jsonResponse,streamReply} from './companion-api.js';
-export default function CompanionChat({sessionId,initialText='',listenId=0,visible=true,onAction=()=>{}}){
+export default function CompanionChat({sessionId,initialText='',initialEvidence=null,greeting='',responseContext=null,listenId=0,visible=true,onAction=()=>{}}){
   const [messages,setMessages]=useState([]),[draft,setDraft]=useState(''),[phase,setPhase]=useState('idle'),[error,setError]=useState(''),[share,setShare]=useState(false),[remember,setRemember]=useState(true),[memoryStatus,setMemoryStatus]=useState(''),[memories,setMemories]=useState(null);
   const [proposals,setProposals]=useState([]),[google,setGoogle]=useState({connected:false}),[connecting,setConnecting]=useState(false);
   const conversation=useRef(crypto.randomUUID());
@@ -25,16 +28,25 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
   useEffect(()=>{conversation.current=crypto.randomUUID();setProposals([]);void refreshGoogle();setMessages([]);setDraft('');setError('');setPhase('idle');fetch('/api/companion/config').then(jsonResponse).then(c=>setMemoryStatus(c.memory?'Backboard ready':'Backboard not configured')).catch(()=>{});
     return()=>{generation.current++;request.current?.abort();clearTimeout(timer.current);recorder.current?.close();recorder.current=null;recording.current=false;busy.current=false;};
   },[sessionId]);
-  useEffect(()=>{if(!listenId)return;const t=setTimeout(()=>void callbacks.current.startRecording(),200);return()=>clearTimeout(t);},[listenId]);
+  useEffect(()=>{if(!listenId||rehearsal)return;const t=setTimeout(()=>void callbacks.current.startRecording(),200);return()=>clearTimeout(t);},[listenId]);
   useEffect(()=>{log.current?.scrollTo(0,log.current.scrollHeight);},[messages,initialText,phase,proposals]);
   async function send(text=draft,captureOnce=false){
     text=text.trim();if(busy.current)return;if(!text){stopRecording();return;}
     if(recording.current){const resume=follow.current;stopRecording();follow.current=resume;}
+    if(rehearsal){
+      setError('');
+      const localWidget=widgetRequest(text);
+      if(localWidget){await showWidget(text,localWidget);return;}
+      if(isPlannerRequest(text)){await showPlanner(text);return;}
+      if(isDismissal(text)){stopRecording();onAction('close');return;}
+      setError('Offline rehearsal supports timers, checklists and the planner. Try “Make a checklist: review cells, practice questions, review mistakes”. Run Acumen normally for AI, voice, Google or screen guidance.');
+      return;
+    }
     if(musicRequest.isFirstPlaylistRequest(text)){
       const voice=follow.current;stopRecording();busy.current=true;setPhase('thinking');setError('');const token=generation.current;
       try{
         const play=window.helpPanel?.playFirstPlaylist??window.helpBridge?.playFirstPlaylist;
-        if(!play)throw new Error('Restart the Jarvis desktop app to enable playlist playback.');
+        if(!play)throw new Error('Restart the Acumen desktop app to enable playlist playback.');
         const result=await play(voice);if(token!==generation.current)return;
         setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:result.started?'I opened YouTube Music. The guide is finding your first playlist and starting it; it will pause if sign-in or your help is needed.':'Playlist startup was stopped.'}]);
       }catch(e){if(token===generation.current){setError(e.message);setDraft(text);}}
@@ -57,7 +69,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
     if(pending&&/^(cancel|cancel it|cancel that|no|no thanks)[.! ]*$/i.test(text)){await performGoogle(pending,'cancel');return;}
     const guide=guideRequest(text);if(guide){
       const voice=follow.current;stopRecording();setError('');
-      try{await openGuide(guide.goal,voice);setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:'Screen guidance is open. Review each step before letting Jarvis act.'}]);}catch(e){setError(e.message);}
+      try{await openGuide(guide.goal,voice);setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:'Screen guidance is open. Review each step before letting Acumen act.'}]);}catch(e){setError(e.message);}
       return;
     }
     const widget=widgetRequest(text);if(widget){await showWidget(text,widget);return;}
@@ -65,7 +77,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
     if(isPlannerRequest(text)){await showPlanner(text);return;}
     const app=appRequest(text);if(app){
       stopRecording();busy.current=true;setError('');
-      try{const launch=window.helpPanel?.openApp??window.helpBridge?.openApp;if(!launch)throw new Error('Restart the Jarvis desktop app to open installed apps.');const result=await launch(app);setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:`Opened ${result.name}.`}]);}
+      try{const launch=window.helpPanel?.openApp??window.helpBridge?.openApp;if(!launch)throw new Error('Restart the Acumen desktop app to open installed apps.');const result=await launch(app);setDraft('');setMessages(previous=>[...previous,{role:'user',text},{role:'model',text:`Opened ${result.name}.`}]);}
       catch(e){setError(e.message);setDraft(text);}finally{busy.current=false;setPhase('idle');}
       return;
     }
@@ -81,7 +93,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
       if(shouldCaptureScreen(text,{sharing:share,once:captureOnce})){const capture=window.helpPanel?.snapshot??window.helpBridge?.snapshot;if(!capture)throw new Error('Screen capture requires the desktop app. Uncheck Screen to continue.');screenshot=await capture();}
       if(token!==generation.current)return;
       controller.signal.throwIfAborted();
-      let answer='';const result=await streamReply({messages:history,sessionId,screenshot,memory:remember,conversationId:conversation.current,activeDeckId:[...proposals].reverse().find(p=>p.result?.id&&p.kind.endsWith('_slides'))?.result.id,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone},delta=>{if(token!==generation.current)return;answer+=delta;setMessages([...base,{role:'model',text:answer}]);},controller.signal);
+      let answer='';const result=await streamReply({messages:history,sessionId,screenshot,responseCue:responseContext?.cue,memory:remember,conversationId:conversation.current,activeDeckId:[...proposals].reverse().find(p=>p.result?.id&&p.kind.endsWith('_slides'))?.result.id,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone},delta=>{if(token!==generation.current)return;answer+=delta;setMessages([...base,{role:'model',text:answer}]);},controller.signal);
       if(token!==generation.current)return;
       let generated;
       if(result.imageRequest){
@@ -107,7 +119,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
       if(result.launch){
         stopRecording();let name;
         if(result.launch.kind==='website'){await openWebsite(result.launch.target);name=new URL(result.launch.target).hostname;}
-        else{const launch=window.helpPanel?.openApp??window.helpBridge?.openApp;if(!launch)throw new Error('Restart Jarvis to open installed apps.');name=(await launch(result.launch.target)).name;}
+        else{const launch=window.helpPanel?.openApp??window.helpBridge?.openApp;if(!launch)throw new Error('Restart Acumen to open installed apps.');name=(await launch(result.launch.target)).name;}
         if(token!==generation.current)return;setMessages([...base,{role:'model',text:`Opened ${name}.`}]);
       }
       if(result.widget){stopRecording();await openWidget({...result.widget,autoStart:true});if(token!==generation.current)return;setMessages([...base,{role:'model',text:`Your ${result.widget.kind} is open${result.widget.action?' and saved':''}.`}]);}
@@ -143,7 +155,7 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
     finally{if(token===generation.current){busy.current=false;setPhase('idle');if(follow.current)timer.current=setTimeout(()=>void callbacks.current.startRecording(),700);else onAction('idle');}}
   }
   async function startRecording(){
-    if(!visibleRef.current||busy.current||recording.current)return;
+    if(rehearsal||!visibleRef.current||busy.current||recording.current)return;
     clearTimeout(timer.current);follow.current=true;recording.current=true;onAction('listening');setPhase('microphone');setError('');const token=generation.current;
     const endpoint=utterance();let acceptAfter=Infinity;
     const fail=e=>{if(token!==generation.current)return;stopRecording();setError('Microphone unavailable. You can type instead. '+e.message);};
@@ -151,7 +163,8 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
       const stream=await openMicrophone(pcm=>{if(!recording.current||Date.now()<acceptAfter)return;const result=endpoint(pcm);if(result)void finishRecording(result.audio,token);},fail);
       if(token!==generation.current||!recording.current){stream.close();return;}
       recorder.current=stream;
-      const tone=stream.context.createOscillator(),gain=stream.context.createGain();gain.gain.value=.035;tone.frequency.value=720;tone.connect(gain);gain.connect(stream.context.destination);tone.start();tone.stop(stream.context.currentTime+.1);
+      const style=responseStyle(responseContext);
+      const tone=stream.context.createOscillator(),gain=stream.context.createGain();gain.gain.value=style==='gentle'?.02:.035;tone.frequency.value=style==='gentle'?520:style==='upbeat'?780:720;tone.connect(gain);gain.connect(stream.context.destination);tone.start();tone.stop(stream.context.currentTime+.1);
       acceptAfter=Date.now()+220;setPhase('recording');
       timer.current=setTimeout(()=>{if(token===generation.current)stopRecording();},47000);
     }catch(e){fail(e);}
@@ -208,16 +221,17 @@ export default function CompanionChat({sessionId,initialText='',listenId=0,visib
   const status=phase==='recording'?'Listening':phase==='transcribing'?'Understanding…':phase==='imaging'?'Generating image…':phase==='thinking'?'Working on it…':phase==='microphone'?'Getting ready…':'Ready when you are';
   return <>
     <div ref={log} className="voice-transcript" role="log" aria-live="polite">
-      {initialText&&<div className="ai-message model"><span className="ai-message-label">CHECK-IN</span><p>{initialText}</p></div>}
-      {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">JARVIS</span>}<p>{m.text||'Thinking…'}</p>{m.image&&<figure className="generated-image"><img src={m.image} alt={m.imagePrompt||'AI-generated image'}/><figcaption>AI-generated · <a href={m.image} download={'jarvis-image-'+i+(m.image.startsWith('data:image/jpeg')?'.jpg':'.png')}>Download image</a></figcaption>{proposals.some(p=>p.status==='preview'&&p.slides)&&<select aria-label="Add generated image to slide" value="" disabled={busy.current} onChange={e=>void attachImage(m,e.target.value)}><option value="">Add to a slide…</option>{proposals.filter(p=>p.status==='preview'&&p.slides).flatMap(p=>p.slides.map((slide,n)=><option key={p.id+':'+n} value={p.id+':'+n}>{p.title} · Slide {n+1}: {slide.title}</option>))}</select>}</figure>}</div>)}
-      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>What can we work on?</h2><p>Ask aloud or type below.<br/>I can help with what’s on your screen.</p><div className="google-shortcuts"><button type="button" onClick={()=>void send('Give me a concise summary of my screen.',true)}>Summarize screen</button><button type="button" onClick={()=>void send('Guide me')}>Guide me</button><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Make a checklist</button></div></div>}
+      {rehearsal&&<p className="monitor-indicator">Offline rehearsal · Local commands, no cloud AI.</p>}
+      {initialText&&<div className="ai-message model"><span className="ai-message-label">CHECK-IN</span><p>{initialText}</p><CheckinEvidence evidence={initialEvidence}/></div>}
+      {messages.map((m,i)=><div className={'ai-message '+m.role} key={i}>{m.role==='model'&&<span className="ai-message-label">ACUMEN</span>}<p>{m.text||'Thinking…'}</p>{m.image&&<figure className="generated-image"><img src={m.image} alt={m.imagePrompt||'AI-generated image'}/><figcaption>AI-generated · <a href={m.image} download={'acumen-image-'+i+(m.image.startsWith('data:image/jpeg')?'.jpg':'.png')}>Download image</a></figcaption>{proposals.some(p=>p.status==='preview'&&p.slides)&&<select aria-label="Add generated image to slide" value="" disabled={busy.current} onChange={e=>void attachImage(m,e.target.value)}><option value="">Add to a slide…</option>{proposals.filter(p=>p.status==='preview'&&p.slides).flatMap(p=>p.slides.map((slide,n)=><option key={p.id+':'+n} value={p.id+':'+n}>{p.title} · Slide {n+1}: {slide.title}</option>))}</select>}</figure>}</div>)}
+      {!initialText&&!messages.length&&<div className="ai-empty"><span className="ai-spark">✦</span><h2>{greeting||'What can we work on?'}</h2><p>{rehearsal?'Try a timer, checklist, or the planner. Cloud AI and voice are off.':'Ask aloud or type below. I can help with what’s on your screen.'}</p>{rehearsal?<div className="google-shortcuts"><button type="button" onClick={()=>void send('Make a checklist: review cells, practice five questions, review mistakes')}>Make a study checklist</button><button type="button" onClick={()=>void send('Start a 1-minute timer')}>Start a 1-minute timer</button><button type="button" onClick={()=>void send('Open my planner')}>Open planner</button></div>:<div className="google-shortcuts"><button type="button" onClick={()=>void send('Give me a concise summary of my screen.',true)}>Summarize screen</button><button type="button" onClick={()=>void send('Guide me')}>Guide me</button><button type="button" onClick={()=>void send('Turn the current screen into study notes in a Google Doc.',true)}>Study notes</button><button type="button" onClick={()=>void send('Turn the current screen into a checklist in a Google Doc.',true)}>Make a checklist</button></div>}</div>}
       <GoogleActions onOpen={openGoogleResult} proposals={proposals} busy={busy.current} connected={google.connected} connecting={connecting} onIllustrate={p=>void performGoogle(p,'illustrate')} onConfirm={p=>void performGoogle(p,'confirm')} onCancel={p=>void performGoogle(p,'cancel')} onConnect={()=>void connectGoogle()}/>
     </div>
     {error&&<p className="voice-error" role="alert">{error}</p>}
-    <div className="ai-status" role="status"><div className={'assistant-orb '+(phase==='recording'?'listening':'')} aria-hidden="true"><i/><i/><i/><i/><i/></div><span>{status}</span><small>{phase==='recording'?'Pause to send':phase==='idle'?'Say “hey Jarvis”':''}</small></div>
+    <div className="ai-status" role="status"><div className={'assistant-orb '+(phase==='recording'?'listening':'')} aria-hidden="true"><i/><i/><i/><i/><i/></div><span>{status}</span><small>{phase==='recording'?'Pause to send':phase==='idle'?(rehearsal?'Type a local command':'Click Listen or type'):''}</small></div>
     <form className="companion-compose" onSubmit={e=>{e.preventDefault();void send();}}>
-      <div className="ai-input"><textarea onFocus={()=>{if(recording.current)stopRecording();}} aria-label="Message Jarvis" rows={1} maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Ask Jarvis anything…" disabled={phase!=='idle'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><button className="ai-send" aria-label="Send message" title="Send · Enter" disabled={phase!=='idle'||!draft.trim()}>↑</button></div>
-      <div className="ai-bottom"><button className="ai-listen" type="button" disabled={busy.current} onClick={()=>recording.current?stopRecording():void startRecording()}>{phase==='recording'?'Ⅱ Pause':'◉ Listen'}</button><label className={'ai-screen '+(share?'enabled':'')} title="Send a screenshot with your next question"><input type="checkbox" checked={share} disabled={phase!=='idle'} onChange={e=>setShare(e.target.checked)}/><span>{share?'Screen shared':'Share screen'}</span></label><details className="ai-settings"><summary aria-label="Companion settings" title="Settings and memory">•••</summary><div className="ai-settings-panel"><div className="google-connection"><strong>Google Workspace</strong><p>{google.connected?google.email:connecting?'Finish sign-in in your browser':'Create Docs, Slides and work blocks'}</p><button type="button" disabled={busy.current} onClick={()=>void (google.connected?disconnectGoogle():connectGoogle())}>{google.connected?'Disconnect Google':connecting?'Connect again':'Connect Google'}</button></div><label><input type="checkbox" checked={remember} disabled={phase!=='idle'} onChange={e=>setRemember(e.target.checked)}/> Remember work context</label><p>{memoryStatus||'Preferences and progress across sessions.'}</p><button type="button" onClick={()=>void loadMemory()}>View saved memories</button>{initialText&&<div className="ai-feedback"><span>How’s it going?</span><button type="button" onClick={()=>onAction('fine')}>Doing fine</button><button type="button" onClick={()=>onAction('tired')}>Feeling tired</button></div>}{messages.length>1&&<button type="button" onClick={()=>onAction('helpful')}>This helped</button>}</div></details></div>
+      <div className="ai-input"><textarea onFocus={()=>{if(recording.current)stopRecording();}} aria-label="Message Acumen" rows={1} maxLength={2000} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Ask Acumen anything…" disabled={phase!=='idle'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><button className="ai-send" aria-label="Send message" title="Send · Enter" disabled={phase!=='idle'||!draft.trim()}>↑</button></div>
+      <div className="ai-bottom"><button className="ai-listen" type="button" disabled={busy.current||rehearsal} onClick={()=>recording.current?stopRecording():void startRecording()}>{phase==='recording'?'Ⅱ Pause':'◉ Listen'}</button><label className={'ai-screen '+(share?'enabled':'')} title="Send a screenshot with your next question"><input type="checkbox" checked={share} disabled={rehearsal||phase!=='idle'} onChange={e=>setShare(e.target.checked)}/><span>{share?'Screen shared':'Share screen'}</span></label><details className="ai-settings"><summary aria-label="Companion settings" title="Settings and memory">•••</summary><div className="ai-settings-panel"><div className="google-connection"><strong>Google Workspace</strong><p>{google.connected?google.email:connecting?'Finish sign-in in your browser':'Create Docs, Slides and work blocks'}</p><button type="button" disabled={busy.current||rehearsal} onClick={()=>void (google.connected?disconnectGoogle():connectGoogle())}>{google.connected?'Disconnect Google':connecting?'Connect again':'Connect Google'}</button></div><label><input type="checkbox" checked={remember} disabled={phase!=='idle'} onChange={e=>setRemember(e.target.checked)}/> Remember work context</label><p>{memoryStatus||'Preferences and progress across sessions.'}</p><button type="button" onClick={()=>void loadMemory()}>View saved memories</button>{initialText&&<div className="ai-feedback"><span>How’s it going?</span><button type="button" onClick={()=>onAction('fine')}>Doing fine</button><button type="button" onClick={()=>onAction('tired')}>Feeling tired</button></div>}{messages.length>1&&<button type="button" onClick={()=>onAction('helpful')}>This helped</button>}</div></details></div>
     </form>
     {memories&&<div className="memory-list"><header><strong>Saved memories</strong><button aria-label="Close memories" onClick={()=>setMemories(null)}>×</button></header>{!memories.length&&<p>No saved memories yet.</p>}{memories.map(m=><div key={m.id??m.memory_id}><p>{m.content}</p><button onClick={()=>void forget(m.id??m.memory_id)}>Forget</button></div>)}</div>}
   </>;

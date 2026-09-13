@@ -6,7 +6,7 @@ export function generateSlideImage(prompt,options={}){
 }
 
 export async function buildSlideDeck(draft,images={}){
-  const pptx=new pptxgen();pptx.layout='LAYOUT_WIDE';pptx.author='Jarvis';pptx.title=draft.title;pptx.subject='Study presentation';pptx.lang='en-US';
+  const pptx=new pptxgen();pptx.layout='LAYOUT_WIDE';pptx.author='Acumen';pptx.title=draft.title;pptx.subject='Study presentation';pptx.lang='en-US';
   const palette={green:['182C25','F4F1E7','E2E8D9','C5D3A8','A7BAA8'],blue:['12243D','F0F6FF','D5E4F5','7DC5ED','9BBAD4'],ivory:['F5F1E8','21372C','35493E','70854B','61715E']}[draft.theme||'green'];
   draft.slides.forEach((item,index)=>{
     const slide=pptx.addSlide();slide.background={color:palette[0]};

@@ -3,6 +3,32 @@ import assert from 'node:assert/strict';
 import {sqliteRepository} from '../server/repository.js';
 import {sessionService} from '../server/session-service.js';
 import {monitoringService} from '../server/monitor.js';
+import {feedDemo} from '../server/demo-scenario.js';
+import {summarize} from '../server/analytics.js';
+test('demo recap preserves descriptive states and accounts for the entire session',async()=>{
+  let now=1000000;const repo=sqliteRepository(':memory:'),sessions=sessionService(repo,()=>now);
+  try{
+    const demo=await sessions.start({goal:'Demo recap',source:'demo',demoScenario:'sustained_pulse'});
+    now+=60000;await feedDemo(sessions,demo,now);await sessions.end(demo.id);
+    const saved=await sessions.get(demo.id),summary=await sessions.summary(demo.id);
+    assert.ok(saved.samples.every(sample=>sample.state==='calibrating'||sample.state==='steady'));
+    assert.equal(summary.stateSeconds.calibrating,20);assert.equal(summary.stateSeconds.steady,40);
+    assert.equal(Object.values(summary.stateSeconds).reduce((sum,value)=>sum+value,0),summary.durationSeconds);
+    assert.ok(Object.values(summary.stateSeconds).every(Number.isFinite));
+    assert.equal(summary.source,'demo');
+  }finally{repo.close();}
+});
+test('older samples with missing or unrecognized states stay unknown in the recap',()=>{
+  const base={source:'demo',heartRate:72,breathingRate:15,hrv:null,quality:1};
+  const summary=summarize({id:'legacy-demo',source:'demo',startedAt:1000000,endedAt:1015000,interventions:[],samples:[
+    {...base,timestamp:1000000},
+    {...base,timestamp:1005000,state:'unrecognized'},
+    {...base,timestamp:1010000,state:'steady'},
+  ]});
+  assert.equal(summary.stateSeconds.unknown,10);assert.equal(summary.stateSeconds.steady,5);
+  assert.equal(Object.values(summary.stateSeconds).reduce((sum,value)=>sum+value,0),summary.durationSeconds);
+  assert.ok(Object.values(summary.stateSeconds).every(Number.isFinite));
+});
 test('demo analysis failure delivers one labeled local fallback, within the existing budget',async()=>{
   let now=1000000,calls=0;const repo=sqliteRepository(':memory:'),sessions=sessionService(repo,()=>now);
   const monitor=monitoringService({sessions,now:()=>now,configured:()=>true,insight:async(_snapshot,options)=>{calls++;assert.equal(options.timeoutMs,8000);throw Object.assign(new Error('Timed out'),{name:'TimeoutError'});}});

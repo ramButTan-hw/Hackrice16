@@ -14,7 +14,7 @@ exports.createCheckinNotifier = function ({Notification, beep, reveal, flash, re
       try{
         current?.close();current=null;
         if(Notification.isSupported()){
-          const notification=new Notification({title:'Jarvis check-in',body:checkin.text,silent:true});
+          const notification=new Notification({title:'Acumen check-in',body:checkin.text,silent:true});
           current=notification;
           notification.on('click',()=>{if(current===notification)reveal();});
           notification.on('failed',()=>report('Desktop notification unavailable; the check-in panel and local sound are still available.'));

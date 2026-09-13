@@ -72,7 +72,7 @@ test('uncertain writes are not blindly retried or labeled successful',async t=>{
 const event={kind:'create_event',title:'Review notes',start:'2026-09-13T16:00:00-05:00',end:'2026-09-13T16:30:00-05:00',timeZone:'America/Chicago'};
 test('calendar work blocks use a dedicated calendar and stable IDs; rescheduling uses ETag',async t=>{
   const f=await fixture(t);const p=await f.workspace.propose(event,'conversation');const saved=await f.workspace.execute(p.id,'conversation');
-  assert.match(saved.result.id,/^[0-9a-f]+$/);assert.equal(f.calls[0].body.summary,'Jarvis work sessions');
+  assert.match(saved.result.id,/^[0-9a-f]+$/);assert.equal(f.calls[0].body.summary,'Acumen work sessions');
   const p2=await f.workspace.propose({...event,kind:'reschedule_event',targetId:saved.result.id,start:'2026-09-13T17:00:00-05:00',end:'2026-09-13T17:30:00-05:00'},'conversation');await f.workspace.execute(p2.id,'conversation');
   assert.equal(f.calls.filter(c=>c.url.endsWith('/calendars')).length,1);assert.equal(f.calls.at(-1).headers['If-Match'],'version-1');
 });

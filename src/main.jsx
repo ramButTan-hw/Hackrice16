@@ -1,8 +1,10 @@
 import WidgetWindow from './WidgetWindow.jsx';
-import {openWidget} from './widget-request.js';
+import CheckinEvidence from './CheckinEvidence.jsx';
+import {rehearsal} from './rehearsal.js';
+import WidgetsMenu from './WidgetsMenu.jsx';
 import SessionAnalytics from './SessionAnalytics.jsx';
 import Planner from './Planner.jsx';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import './ui-polish.css';
@@ -59,9 +61,10 @@ function App() {
   const [monitoring, setMonitoring] = useState(false);
   const [pinned, setPinned] = useState(true);
   const [tab, setTab] = useState('session');
-  const [goal, setGoal] = useState('');
+  const [goal, setGoal] = useState(rehearsal ? 'Prepare for my biology exam' : '');
   const [session, setSession] = useState(null);
   const [state, setState] = useState(null);
+  const [responseCue, setResponseCue] = useState(null);
   const [history, setHistory] = useState([]);
   const [summary, setSummary] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -70,10 +73,12 @@ function App() {
   const epoch = useRef(0);
   const collapseButton = useRef(null);
   const active = session?.status === 'active';
+  const responseContext = useMemo(() => ({cue: responseCue, sessionId: session?.id, source: session?.source, active, feeling: session?.assistance?.feeling}), [responseCue, session?.id, session?.source, active, session?.assistance?.feeling]);
   const time = elapsed(session, now);
   useEffect(()=>{void desktop?.setSession?.(active?session.id:null).catch(error=>setError(error.message));},[active,session?.id]);
 
   useEffect(() => {
+    if(rehearsal)document.title='Acumen rehearsal';
     document.documentElement.classList.toggle('desktop', Boolean(desktop));
     const id = readSaved();
     if (id) api('/sessions/' + id).then(data => {
@@ -129,6 +134,7 @@ function App() {
   }
   async function start(event) {
     event.preventDefault();
+    if (rehearsal) return startDemo();
     if (busy || !goal.trim()) return;
     setBusy(true); setError(''); epoch.current++;
     try {
@@ -184,8 +190,9 @@ function App() {
           </div>
         )}<div className="expanded-panel" hidden={compact}>
             <header className="topbar">
-              <div className="window-drag-area drag app-wordmark"><span aria-hidden="true">✦</span> Jarvis</div>
+              <div className="window-drag-area drag app-wordmark"><span aria-hidden="true">✦</span> Acumen</div>
               <div className="window-actions">
+                <WidgetsMenu onPlanner={openPlanner} onError={setError}/>
                 <ThemePicker settings={appearance} onChange={setAppearance}/>
                 {desktop && <><button className={'icon-button ' + (pinned ? 'selected' : '')} aria-label="Keep on top" aria-pressed={pinned} title="Keep on top" onClick={togglePin}><Icon name="pin"/></button><button className="icon-button" aria-label="Minimize window" onClick={() => desktop.minimize()}><Icon name="minus"/></button></>}
                 <button ref={collapseButton} className="icon-button" aria-label="Collapse companion" aria-expanded="true" title="Collapse to compact mode" onClick={toggleCompact}><Icon name="collapse"/></button>
@@ -196,39 +203,38 @@ function App() {
               <button className={tab === 'session' ? 'current' : ''} aria-pressed={tab === 'session'} onClick={() => setTab('session')}>Session</button>
               <button className={tab === 'history' ? 'current' : ''} aria-pressed={tab === 'history'} onClick={() => setTab('history')}>History</button>
               <button className={tab === 'chat' ? 'current' : ''} aria-pressed={tab === 'chat'} onClick={() => setTab('chat')}>Chat</button>
-              <button className={tab === 'planner' ? 'current' : ''} aria-pressed={tab === 'planner'} onClick={openPlanner}>Planner</button>
               <button className={tab === 'log' ? 'current' : ''} aria-pressed={tab === 'log'} onClick={() => setTab('log')}>Log</button>
             </nav>
             <div className="content">
-              {session?.source==='demo'&&<p className="monitor-indicator" role="status"><strong>SIMULATED BIOMETRICS</strong> · Demo session · Gemini responses are real.</p>}
+              {rehearsal&&<p className="monitor-indicator" role="status"><strong>OFFLINE REHEARSAL</strong> · Synthetic signals and local check-in. Separate temporary data. Camera and voice are off.</p>}
+              {!rehearsal&&session?.source==='demo'&&<p className="monitor-indicator" role="status"><strong>SIMULATED BIOMETRICS</strong> · {message?.provider==='demo'?'Local fallback check-in':'Gemini review requested when eligible'}.</p>}
               {tab !== 'session' && monitoring && <p className="monitor-indicator">Camera on · Automatic analysis running</p>}
               <div hidden={tab !== 'session'}>
                 {session?.status === 'ended' && <SessionAnalytics key={session.id} session={session} api={api} onPlan={openPlanner}/>}
                 {!active&&<div className="session-intro"><span className="eyebrow">{session?'A FRESH START':'YOUR WORK COMPANION'}</span><h1>One thing at a time.</h1><p>Pick a task. I’ll be here if you need a hand.</p></div>}
-                {<div className="widget-launchers"><button onClick={()=>void openWidget({kind:'timer'}).catch(e=>setError(e.message))}>◷ Timer</button><button onClick={()=>void openWidget({kind:'checklist'}).catch(e=>setError(e.message))}>☑ Checklist</button></div>}
                 <form className={'session-card '+(!active?'session-idle':'')} onSubmit={start}>
                   <label className="eyebrow" htmlFor="intention">WORKING ON</label>
                   <input id="intention" placeholder="e.g. Review lecture notes" value={goal} onChange={event => setGoal(event.target.value)} maxLength={200} disabled={active || busy} required autoComplete="off"/>
                   <div className="timer-row"><div><div className="timer">{time}</div><span className="timer-label">{status}</span></div>
                     {active ? <button className="session-action ending" type="button" disabled={busy} onClick={end} aria-label="End session"><Icon name="stop"/></button> : <button className="session-action start-session" disabled={busy || !goal.trim()} aria-label="Start session"><Icon name="play"/><span>Start session</span></button>}</div>
                 </form>
-                {!active&&<button type="button" className="idle-help" onClick={()=>setTab('chat')}><span className="idle-help-icon" aria-hidden="true">✦</span><span><strong>Need a hand getting started?</strong><small>Ask Jarvis a question or summarize your screen.</small></span><Icon name="arrow"/></button>}
-              <Assistance session={session} onSessionEnded={data=>{epoch.current++;setSession(data);remember(null);setTab('session');if(compact)void toggleCompact();void window.presage?.stop().catch(()=>{});}} onReveal={()=>{setTab('session');if(compact)void toggleCompact();}}/>
+                {!active&&<button type="button" className="idle-help" onClick={()=>setTab('chat')}><span className="idle-help-icon" aria-hidden="true">✦</span><span><strong>{rehearsal?'Try local commands':'Need a hand getting started?'}</strong><small>{rehearsal?'Make a checklist or start a timer.':'Ask Acumen a question or summarize your screen.'}</small></span><Icon name="arrow"/></button>}
+              <Assistance session={session} responseContext={responseContext} onSessionEnded={data=>{epoch.current++;setSession(data);remember(null);setTab('session');if(compact)void toggleCompact();void window.presage?.stop().catch(()=>{});}} onReveal={()=>{setTab('session');if(compact)void toggleCompact();}}/>
 
-                {active&&session.demoScenario&&<DemoCamera sessionId={session.id}/>}
-                {active&&session.demoScenario&&<details className="camera-checkin demo-details"><summary>Pulse-rise demo <span>Simulated</span></summary><p>{now-session.startedAt<=20000?'Building a simulated baseline around 72 bpm (20 seconds).':now-session.startedAt<100000?'Pulse fluctuating around 94 bpm. Demo uses a shortened 30-second hold before review.':now-session.startedAt<=300000?'Recovery: easing back toward 72 bpm.':'Scenario complete. End the session when ready.'}</p><p>Camera preview is live. Pulse, breathing and inactivity are synthetic and stored in this separate demo session. Expect a Gemini review around one minute; Gemini can choose not to interrupt.</p><p>Gemini reviews: {session.monitor?.calls??0} / 6 · {session.monitor?.status?.replaceAll('_',' ')}</p>{session.monitor?.error&&<p role="alert">{session.monitor.error}</p>}</details>}
-                {session?.source!=='demo'&&<Presage sessionId={session?.id} enabled={active} onRunning={setMonitoring} onSample={({ sample, workState }) => { setState(workState); setSession(previous => previous ? { ...previous, samples: [...previous.samples.filter(item => item.timestamp !== sample.timestamp), sample] } : previous); }}/>}
+                {!rehearsal&&active&&session.demoScenario&&<DemoCamera sessionId={session.id}/>}
+                {active&&session.demoScenario&&<details className="camera-checkin demo-details"><summary>Pulse-rise demo <span>Simulated</span></summary><p>{now-session.startedAt<=20000?'Building a simulated baseline around 72 bpm (20 seconds).':now-session.startedAt<100000?'Pulse fluctuating around 94 bpm. Demo uses a shortened 30-second hold before review.':now-session.startedAt<=300000?'Recovery: easing back toward 72 bpm.':'Scenario complete. End the session when ready.'}</p><p>{rehearsal?'No camera or microphone is used. A local example check-in arrives around one minute.':'Camera preview is live. Expect a Gemini review around one minute; Gemini can choose not to interrupt.'} Pulse, breathing and inactivity are synthetic and stored separately from real measurements.</p><p>{rehearsal?'Local reviews':'Review attempts'}: {session.monitor?.calls??0} / 6 · {session.monitor?.status?.replaceAll('_',' ')}</p>{session.monitor?.error&&<p role="alert">{session.monitor.error}</p>}</details>}
+                {session?.source!=='demo'&&<Presage sessionId={session?.id} enabled={active} onRunning={setMonitoring} onResponseCue={setResponseCue} onSample={({ sample, workState }) => { setState(workState); setSession(previous => previous ? { ...previous, samples: [...previous.samples.filter(item => item.timestamp !== sample.timestamp), sample] } : previous); }}/>}
                 {(active||last)&&<section className="signals" aria-label="Session readings"><div><span><Icon name="heart"/> Heart rate</span><strong>{(last?.qualityByMetric?.heartRate ?? last?.quality) >= 0.7 ? Number.isFinite(last?.heartRate) ? last.heartRate.toFixed(1) : '—' : '—'}<small>bpm</small></strong></div><div><span><Icon name="wind"/> Breathing</span><strong>{(last?.qualityByMetric?.breathingRate ?? last?.quality) >= 0.7 ? Number.isFinite(last?.breathingRate) ? last.breathingRate.toFixed(1) : '—' : '—'}<small>/ min</small></strong></div><div className="signal-note"><span>{fresh ? (session.source==='demo'?'Simulated reading':'Live reading') : last ? `Last reading · ${new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${last.quality < 0.7 ? ' · Low signal quality' : ''}` : 'No readings yet'}</span></div></section>}
-                {message && <section className="companion-note"><div><span className="eyebrow">CHECK-IN</span><p>{message.text}</p>{message.provider === 'demo' && <small>Demo check-in</small>}</div></section>}
+                {message && <section className="companion-note"><div><span className="eyebrow">CHECK-IN</span><p>{message.text}</p>{message.provider === 'demo' && <small>Local demo check-in · Not generated by AI</small>}<CheckinEvidence evidence={message.evidence}/></div></section>}
                 <DevicePermissions/>{session&&<details className="details"><summary>Session details <Icon name="chevron"/></summary><div className="detail-body"><p>{state?.reason ?? 'Readings will appear when the camera integration connects. Your timer works independently.'}</p><dl><div><dt>Samples received</dt><dd>{session?.samples?.length ?? 0}</dd></div><div><dt>Companion check-ins</dt><dd>{session?.interventions?.length ?? 0}</dd></div>{summary && <div><dt>Average heart rate</dt><dd>{summary.averageHeartRate == null ? '—' : summary.averageHeartRate.toFixed(1) + ' bpm'}</dd></div>}</dl></div></details>}
               </div>{tab === 'history' ? <section className="history"><div className="history-list">{history.length ? history.map(item => <button className="history-item" key={item.id} disabled={busy || (active && session.id !== item.id)} onClick={() => openHistory(item)}><div className="history-item-text"><strong>{item.goal}</strong><small>{new Date(item.startedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {item.status === 'active' ? 'In progress' : elapsed(item, now)}{item.source === 'demo' ? ' · Demo' : ''}</small></div><Icon name="arrow"/></button>) : <div className="empty-history"><p>No sessions yet.</p><button onClick={() => setTab('session')}>Start a session <Icon name="arrow"/></button></div>}</div></section> : null}
               {tab === 'planner' && <Planner api={api}/>}
-              <Chat visible={tab === 'chat'} sessionId={session?.id}/>
+              <Chat visible={tab === 'chat'} sessionId={session?.id} responseContext={responseContext}/>
               <EventLog visible={tab === 'log'} sessionId={session?.id}/>
               {tab !== 'session' && message && <section className="companion-note"><div><span className="eyebrow">COMPANION</span><p>{message.text}</p></div></section>}
               {error && <div className="error" role="alert"><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><Icon name="close"/></button></div>}
             </div>
-            {tab==='session'&&<footer className="demo-footer"><span className="footer-status"><span aria-hidden="true"/>{active?'Session active':'Monitoring off'}</span><button type="button" className="demo-launch" disabled={busy||active||!goal.trim()} onClick={startDemo} title={active?'End the current session to start a separate demo.':'Start a simulated pulse rise with live camera preview'}>Demo pulse rise</button></footer>}
+            {tab==='session'&&<footer className="demo-footer"><span className="footer-status"><span aria-hidden="true"/>{active?'Session active':'Monitoring off'}</span><button type="button" className="demo-launch" disabled={busy||active||!goal.trim()} onClick={startDemo} title={active?'End the current session to start a separate demo.':rehearsal?'Start a simulated pulse rise without camera or providers.':'Start a simulated pulse rise with live camera preview'}>{rehearsal?'Start rehearsal':'Demo pulse rise'}</button></footer>}
           </div>
         {compact && error && <span className="compact-error" title={error} role="alert">Connection issue — expand for details</span>}
       </main>
@@ -239,16 +245,14 @@ function PlannerWindow() {
   const [appearance,setAppearance]=useTheme();
   const controls=window.plannerWindow;
   useEffect(() => {
-    document.title='Jarvis Planner';
+    document.title='Acumen Planner';
     document.documentElement.classList.toggle('desktop',Boolean(controls));
     document.documentElement.classList.add('planner-surface');
     return()=>{document.documentElement.classList.remove('desktop','planner-surface');};
   }, []);
-  return <div className="stage planner-stage"><main className="glass-shell planner-shell" aria-label="Jarvis planner window">
-    <header className="topbar"><div className="window-drag-area drag app-wordmark"><span aria-hidden="true">✦</span> Jarvis <small className="planner-window-label">Planner</small></div><div className="window-actions"><ThemePicker settings={appearance} onChange={setAppearance}/>{controls&&<><button className="icon-button" aria-label="Minimize planner" onClick={()=>controls.minimize()}><Icon name="minus"/></button><button className="icon-button" aria-label="Close planner" onClick={()=>controls.close()}><Icon name="close"/></button></>}</div></header>
+  return <div className="stage planner-stage"><main className="glass-shell planner-shell" aria-label="Acumen planner window">
+    <header className="topbar"><div className="window-drag-area drag app-wordmark"><span aria-hidden="true">✦</span> Acumen <small className="planner-window-label">Planner</small></div><div className="window-actions"><ThemePicker settings={appearance} onChange={setAppearance}/>{controls&&<><button className="icon-button" aria-label="Minimize planner" onClick={()=>controls.minimize()}><Icon name="minus"/></button><button className="icon-button" aria-label="Close planner" onClick={()=>controls.close()}><Icon name="close"/></button></>}</div></header>
     <div className="content planner-window"><Planner api={api}/></div>
   </main></div>;
 }
 createRoot(document.getElementById('root')).render(<React.StrictMode>{['timer','checklist'].includes(new URLSearchParams(location.search).get('widget'))?<WidgetWindow kind={new URLSearchParams(location.search).get('widget')}/>:new URLSearchParams(location.search).has('planner-window')?<PlannerWindow/>:new URLSearchParams(location.search).has('appearance-window')?<AppearanceWindow/>:new URLSearchParams(location.search).has('help-window')?<HelpWindow/>:<App/>}</React.StrictMode>);
-
-

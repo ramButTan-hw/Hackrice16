@@ -71,14 +71,32 @@ if action == "restore" {
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid) else { reject("Bring the target app forward and get a fresh step.") }
     output(["ok": true]); exit(0)
 }
-guard AXIsProcessTrusted() else { reject("Allow Jarvis / Electron in macOS Accessibility settings, then try again.") }
-guard CGPreflightPostEventAccess() else { reject("macOS is blocking mouse and keyboard input. Enable Jarvis / Electron in Accessibility, then refresh the step.") }
+guard AXIsProcessTrusted() else { reject("Allow Acumen / Electron in macOS Accessibility settings, then try again.") }
+guard CGPreflightPostEventAccess() else { reject("macOS is blocking mouse and keyboard input. Enable Acumen / Electron in Accessibility, then refresh the step.") }
 guard let pid = body["pid"] as? Int, pid > 0, Int(front?.processIdentifier ?? 0) == pid else { reject("The active app changed. Get a fresh step.") }
 let bundle = front?.bundleIdentifier ?? ""
 if ["com.apple.Terminal", "com.googlecode.iterm2", "com.apple.systempreferences"].contains(bundle) { reject("Complete this step yourself, then ask for the next step.") }
 if action == "locate_control" {
     guard let label = body["label"] as? String, !label.isEmpty, label.count <= 120 else { reject("Invalid control label.") }
     let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    func matchesLabel(_ element: AXUIElement) -> Bool {
+        for attribute in [kAXTitleAttribute, kAXDescriptionAttribute, kAXPlaceholderValueAttribute] {
+            var value: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+            if let string = value as? String, string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized { return true }
+        }
+        // HTML <label for> names are exposed as a related AX title element.
+        var title: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXTitleUIElementAttribute as CFString, &title) == .success,
+           let title = title, CFGetTypeID(title) == AXUIElementGetTypeID() {
+            for attribute in [kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute] {
+                var value: CFTypeRef?
+                AXUIElementCopyAttributeValue(title as! AXUIElement, attribute as CFString, &value)
+                if let string = value as? String, string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized { return true }
+            }
+        }
+        return false
+    }
     let root = AXUIElementCreateApplication(pid_t(pid))
     var window: CFTypeRef?
     AXUIElementCopyAttributeValue(root, kAXFocusedWindowAttribute as CFString, &window)
@@ -87,19 +105,16 @@ if action == "locate_control" {
     var index = 0
     var matches: [[String: Double]] = []
     let deadline = Date().addingTimeInterval(2)
-    let roles: Set<String> = ["AXButton", "AXPopUpButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXCell", "AXTab", "AXComboBox"]
+    let roles: Set<String> = body["kind"] as? String == "text"
+        ? ["AXTextField", "AXTextArea", "AXComboBox"]
+        : ["AXButton", "AXPopUpButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXCell", "AXTab", "AXComboBox"]
     while index < queue.count && index < 7000 && Date() < deadline {
         let element = queue[index]; index += 1
-        var role: CFTypeRef?
+        var role: CFTypeRef?, subrole: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-        if roles.contains(role as? String ?? "") {
-            var matched = false
-            for attribute in [kAXTitleAttribute, kAXDescriptionAttribute] {
-                var value: CFTypeRef?
-                AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-                if let string = value as? String, string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized { matched = true }
-            }
-            if matched {
+        AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole)
+        if roles.contains(role as? String ?? "") && subrole as? String != "AXSecureTextField" {
+            if matchesLabel(element) {
                 var rawPosition: CFTypeRef?, rawSize: CFTypeRef?
                 AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &rawPosition)
                 AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &rawSize)
@@ -117,11 +132,7 @@ if action == "locate_control" {
                             guard let current = candidate else { break }
                             var owner: pid_t = 0
                             guard AXUIElementGetPid(current, &owner) == .success, Int(owner) == pid else { break }
-                            for attribute in [kAXTitleAttribute, kAXDescriptionAttribute] {
-                                var value: CFTypeRef?
-                                AXUIElementCopyAttributeValue(current, attribute as CFString, &value)
-                                if let string = value as? String, string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized { visible = true }
-                            }
+                            visible = matchesLabel(current)
                             if visible { break }
                             var parent: CFTypeRef?
                             guard AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parent) == .success,

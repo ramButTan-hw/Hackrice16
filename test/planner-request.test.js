@@ -12,7 +12,7 @@ test('planner opens from both main chat and voice panel; failures propagate',asy
   await openPlanner({companionWindow:{planner:async()=>{main++;}}});
   await openPlanner({helpPanel:{planner:async()=>{panel++;}}});
   assert.equal(main,1);assert.equal(panel,1);
-  await assert.rejects(openPlanner({helpPanel:{}}),/Restart Jarvis/);
+  await assert.rejects(openPlanner({helpPanel:{}}),/Restart Acumen/);
   await assert.rejects(openPlanner({companionWindow:{planner:async()=>{throw new Error('window failed');}}}),/window failed/);
   await assert.rejects(openPlanner({open:()=>null}),/blocked/);
 });

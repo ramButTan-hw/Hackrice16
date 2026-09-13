@@ -1,6 +1,7 @@
 import Attention from './Attention.jsx';
 import { useEffect, useRef, useState } from 'react';
 const bridge = window.presage;
+function savedExpressionPreference() { try { return localStorage.getItem('companion.expressionResponses') === 'true'; } catch { return false; } }
 async function post(id, endpoint, body) {
   const response = await fetch(`/api/sessions/${id}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const raw = await response.text();
@@ -9,16 +10,20 @@ async function post(id, endpoint, body) {
   return data;
 }
 const labels = { limited_data: 'Reviewing available data; physiology is not reliable yet.', calibrating: 'Establishing a reliable baseline…', waiting_signal: 'Waiting for fresh readings…', analyzing_local: 'Locally analyzing the latest window…', analyzing_gemini: 'Gemini is reviewing the combined signals…', watching: 'Watching for a useful moment to help', budget_reached: 'Analysis budget reached. Monitoring continues.', paused: 'Analysis paused', error: 'Analysis needs attention' };
-export default function Presage({ sessionId, enabled, onSample, onRunning }) {
+export default function Presage({ sessionId, enabled, onSample, onRunning, onResponseCue }) {
   const [running, setRunning] = useState(false), [starting, setStarting] = useState(false);
   const [voice, setVoice] = useState(false), [monitor, setMonitor] = useState(null);
   const [hint, setHint] = useState('Camera off. Monitoring starts with your session.');
   const [cameraInfo, setCameraInfo] = useState(null);
   const [logError, setLogError] = useState(''), [connectionError, setConnectionError] = useState('');
+  const [expressionResponses, setExpressionResponses] = useState(savedExpressionPreference);
+  const [expressionCue, setExpressionCue] = useState(null), [changingExpressions, setChangingExpressions] = useState(false);
+  const expressionPreference = useRef(expressionResponses), scope = useRef({sessionId, enabled});
+  scope.current = {sessionId, enabled};
   const video = useRef(null), stream = useRef(null), loop = useRef(null);
   const audio = useRef(null);
   const generation = useRef(0), pending = useRef(false), capturing = useRef(false);
-  const handlers = useRef({ onSample, onRunning }); handlers.current = { onSample, onRunning };
+  const handlers = useRef({ onSample, onRunning, onResponseCue }); handlers.current = { onSample, onRunning, onResponseCue };
   useEffect(() => { if (!voice || !running) audio.current?.pause(); }, [voice, running]);
   useEffect(() => { setMonitor(null); setConnectionError(''); setLogError(''); }, [sessionId]);
   function release() {
@@ -26,13 +31,14 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
     if (video.current) video.current.srcObject = null;
     handlers.current.onRunning?.(false);
+    setExpressionCue(null); handlers.current.onResponseCue?.(null);
   }
   async function stop() {
     generation.current++; release(); setRunning(false); setStarting(false);
     await Promise.allSettled([bridge?.stop(), sessionId ? post(sessionId, 'monitor', { enabled: false }) : Promise.resolve()]);
   }
-  async function start() {
-    if (capturing.current || !enabled || !bridge) return;
+  async function start(expressions = expressionPreference.current) {
+    if (capturing.current || !enabled || !bridge || !scope.current.enabled || scope.current.sessionId !== sessionId) return;
     capturing.current = true;
     const version = ++generation.current;
     setStarting(true); setHint('Opening camera…');
@@ -43,7 +49,7 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
       stream.current = capture; video.current.srcObject = capture;
       await video.current.play();
       if (version !== generation.current) return;
-      await bridge.start();
+      await bridge.start({expressionResponses: expressions});
       if (version !== generation.current) { await bridge.stop(); return; }
       await post(sessionId, 'monitor', { enabled: true, voice });
       if (version !== generation.current) { await post(sessionId, 'monitor', { enabled: false }); return; }
@@ -95,8 +101,13 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
       }
       if (event.type === 'error') { setHint(event.message); void stop(); }
       if (event.type === 'stopped') {
+        const unexpected = capturing.current;
         generation.current++; release(); setRunning(false); setStarting(false);
-        void post(sessionId, 'monitor', { enabled: false }).catch(() => {});
+        if (unexpected) void post(sessionId, 'monitor', { enabled: false }).catch(() => {});
+      }
+      if (event.type === 'expression' && capturing.current && expressionPreference.current) {
+        const cue = event.cue ? {...event.cue, sessionId} : null;
+        setExpressionCue(cue); handlers.current.onResponseCue?.(cue);
       }
       if (event.type === 'sample' && !pending.current && capturing.current) {
         pending.current = true;
@@ -129,6 +140,17 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     setVoice(value);
     if (running) try { await post(sessionId, 'monitor', { enabled: true, voice: value }); } catch (error) { setHint(error.message); }
   }
+  async function toggleExpressionResponses(value) {
+    const resume = running;
+    setChangingExpressions(true);
+    expressionPreference.current = value; setExpressionResponses(value);
+    try { localStorage.setItem('companion.expressionResponses', String(value)); } catch {}
+    setExpressionCue(null); handlers.current.onResponseCue?.(null);
+    try {
+      if (resume) { await stop(); await start(value); }
+    } catch (error) { setHint('Could not update expression responses. ' + error.message); }
+    finally { setChangingExpressions(false); }
+  }
   if(!enabled)return null;
   const decision = monitor?.decisions?.at(-1);
   return <section className="camera-checkin" aria-label="Continuous monitoring">
@@ -139,8 +161,14 @@ export default function Presage({ sessionId, enabled, onSample, onRunning }) {
     {enabled&&<Attention video={video} sessionId={sessionId} running={running}/>}
     {enabled&&<div className="camera-actions">{running || starting
       ? <button type="button" onClick={() => { setHint('Camera and automatic analysis paused.'); void stop(); }}>Pause monitoring</button>
-      : <button type="button" disabled={!bridge || !enabled} onClick={start}>Resume monitoring</button>}
-      <span>Check-ins with Jarvis</span></div>}
+      : <button type="button" disabled={!bridge || !enabled || changingExpressions} onClick={()=>void start()}>Resume monitoring</button>}
+      <span>Check-ins with Acumen</span></div>}
+    <details className="expression-options diagnostic-details"><summary>Expression-aware responses</summary>
+      <label><input type="checkbox" checked={expressionResponses} disabled={!bridge || starting || changingExpressions} onChange={event=>void toggleExpressionResponses(event.target.checked)}/> Adapt Acumen’s tone with facial expressions</label>
+      <p>Optional. Changing this restarts camera analysis. A sustained expression estimate can adjust the greeting and reply style; your words always come first.</p>
+      {expressionResponses && <p role="status">{changingExpressions ? 'Updating camera analysis…' : !running ? 'Paused · Normal response style' : expressionCue && Date.now() - expressionCue.observedAt <= 5000 ? `${expressionCue.tone === 'gentle' ? 'Gentle' : expressionCue.tone === 'upbeat' ? 'Upbeat' : 'Normal'} response style · Recent facial cue` : 'No reliable expression cue · Normal response style'}</p>}
+      <p>Expression scores stay out of saved sessions and work memory. Only the response style accompanies a chat request to Gemini. Expressions can be misread; they do not establish emotion or stress. Availability depends on your Presage subscription.</p>
+    </details>
     {enabled && <div className="monitor-status">
       <p>{monitor?.error || labels[monitor?.status] || 'Preparing automatic analysis…'}</p>
       {monitor?.waitReason && <p>{monitor.waitReason}</p>}

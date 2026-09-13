@@ -6,6 +6,7 @@ import { analyzeInsight } from './insights.js';
 import { appendEvent } from './event-log.js';
 import { evaluateBreak, assistanceState, createCheckin } from './break-score.js';
 import { feedDemo } from './demo-scenario.js';
+import { checkinEvidence } from './checkin-evidence.js';
 
 export const MONITOR = Object.freeze({ analysisMs: 10000, regularMs: 60000, minimumMs: 45000, interventionMs: 90000, budget: 6, warmupMs: 60000, staleMs: 10000 });
 export function monitoringService({ sessions, now = Date.now, analyze = analyzeWindow, insight = analyzeInsight, configured = () => Boolean(process.env.GEMINI_API_KEY) }) {
@@ -82,7 +83,9 @@ export function monitoringService({ sessions, now = Date.now, analyze = analyzeW
     let s=await sessions.get(id);
     const a=assistanceState(s);
     if(a.breakStartedAt||a.checkin||now()<a.quietUntil||now()<(a.helpUntil??0))return;
-    if (!configured()) throw new Error('Add GEMINI_API_KEY and restart the backend for automatic analysis.');
+    const hasModel = configured();
+    const localDemo = !hasModel && s.source === 'demo' && s.demoScenario === 'sustained_pulse';
+    if (!hasModel && !localDemo) throw new Error('Add GEMINI_API_KEY and restart the backend for automatic analysis.');
     if (s.monitor.calls >= MONITOR.budget) {
       await sessions.update(id, s => { s.monitor.status = 'budget_reached'; }); return;
     }
@@ -104,17 +107,18 @@ export function monitoringService({ sessions, now = Date.now, analyze = analyzeW
     let reserved = false;
     await sessions.update(id, s => {
       if (!alive() || !s.monitor.enabled || s.monitor.calls >= MONITOR.budget) return;
-      s.monitor.calls++; s.monitor.lastCallAt = now(); s.monitor.lastSignature = signature; s.monitor.status = 'analyzing_gemini'; s.monitor.waitReason = null; s.monitor.nextAnalysisAt = now() + MONITOR.regularMs; appendEvent(s, now(), 'gemini', 'request', snapshot); reserved = true;
+      s.monitor.calls++; s.monitor.lastCallAt = now(); s.monitor.lastSignature = signature; s.monitor.status = localDemo ? 'analyzing_demo' : 'analyzing_gemini'; s.monitor.waitReason = null; s.monitor.nextAnalysisAt = now() + MONITOR.regularMs; appendEvent(s, now(), localDemo ? 'demo' : 'gemini', 'request', snapshot); reserved = true;
     });
     if (!reserved || !alive()) return;
     let result;
     const requestStarted=Date.now();
     try{
+      if (localDemo) throw new Error('Offline rehearsal: Gemini is not configured. Using the labeled local demo check-in.');
       result=await insight(snapshot,{signal:state.abort.signal,timeoutMs:s.demoScenario?8000:20000});
       await sessions.update(id,s=>{s.monitor.error=null;s.monitor.lastRequestMs=Date.now()-requestStarted;});
     }catch(error){
       if(!alive())return;
-      await sessions.update(id,s=>{s.monitor.error=error.name==='TimeoutError'?'Gemini check-in timed out. Voice help is still available.':error.message;s.monitor.lastRequestMs=Date.now()-requestStarted;appendEvent(s,now(),'gemini','failed',{message:s.monitor.error,durationMs:s.monitor.lastRequestMs});});
+      await sessions.update(id,s=>{s.monitor.error=localDemo?null:error.name==='TimeoutError'?'Gemini check-in timed out. You can still use local timer and checklist commands.':error.message;s.monitor.lastRequestMs=Date.now()-requestStarted;appendEvent(s,now(),localDemo?'demo':'gemini',localDemo?'local_fallback':'failed',{message:error.message,durationMs:s.monitor.lastRequestMs});});
       if(s.source!=='demo'||!s.demoScenario)throw error;
       result={decision:'intervene',reason:'Demo-only local fallback: Gemini analysis was unavailable.',message:'Hey, just checking in. How are you feeling about the work? We can take it one step at a time.',provider:'demo'};
     }
@@ -130,10 +134,11 @@ export function monitoringService({ sessions, now = Date.now, analyze = analyzeW
       s.monitor.decisions.push(decision);
       s.monitor.decisions = s.monitor.decisions.slice(-MONITOR.budget);
       s.monitor.status = 'watching';
-      appendEvent(s, now(), 'gemini', 'response', decision);
+      appendEvent(s, now(), result.provider === 'demo' ? 'demo' : 'gemini', 'response', decision);
       if (allowed) {
         createCheckin(s,result.message,signature,now());
-        intervention = { id: randomUUID(), timestamp: now(), text: result.message, provider: result.provider??'gemini', state: signature };
+        intervention = { id: randomUUID(), timestamp: now(), text: result.message, provider: result.provider??'gemini', state: signature, evidence: checkinEvidence(snapshot) };
+        s.assistance.checkin.evidence = intervention.evidence;
         s.interventions.push(intervention);
       }
     });

@@ -23,7 +23,7 @@ export function googleAuth({env=process.env,fetcher=fetch,now=Date.now,getPort=(
       const state=String(query.state||'');
       if(!pending||pending.expiresAt<now()||Buffer.byteLength(state)!==Buffer.byteLength(pending.state)||!timingSafeEqual(Buffer.from(state),Buffer.from(pending.state)))fail('Google sign-in expired or did not match. Start Connect Google again.',400);
       const attempt=pending;pending=null;
-      if(query.error)fail('Google access was not granted. You can reconnect from Jarvis.',400);
+      if(query.error)fail('Google access was not granted. You can reconnect from Acumen.',400);
       if(typeof query.code!=='string'||query.code.length>4096)fail('Missing Google authorization code.');
       const next=await token({code:query.code,code_verifier:attempt.verifier,redirect_uri:attempt.redirectUri,grant_type:'authorization_code'});
       const scopes=new Set(String(next.scope||'').split(' '));

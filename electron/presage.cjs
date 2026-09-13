@@ -1,3 +1,4 @@
+const { EXPRESSIONS_METRIC, createExpressionTracker } = require('./expression-cue.cjs');
 function presageError(code, detail, retryable) {
   const messages = {
     1: 'Presage is in an invalid state. Stop and resume monitoring.',
@@ -22,37 +23,51 @@ function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now 
   let sdk, owner, stopping;
   let lastFrame = -Infinity, lastMetric = 0, lastStamp = '';
   let latest = {}, lastValidation = null;
+  const expressions = createExpressionTracker();
+  let expressionResponses = false, lastExpression = -Infinity;
   const emit = value => { if (owner && !owner.isDestroyed()) owner.send('presage:event', value); };
   async function stop() {
     if (stopping) return stopping;
     const current = sdk; sdk = null;
     stopping = (async () => {
       try { if (current) { try { await current.stopAsync(); } finally { await current.destroy(); } } }
-      finally { emit({ type: 'stopped' }); owner = null; }
+      finally { expressions.reset(); emit({ type: 'expression', cue: null }); emit({ type: 'stopped' }); owner = null; }
     })();
     try { await stopping; } finally { stopping = null; }
   }
   return {
     status: () => ({ active: Boolean(sdk) }),
-    async start(sender) {
+    async start(sender, options = {}) {
+      if (options === null || typeof options !== 'object' || (options.expressionResponses !== undefined && typeof options.expressionResponses !== 'boolean')) throw new Error('Invalid expression response preference.');
       if (sdk || stopping) throw new Error('Camera monitoring is already running or stopping.');
       if (!process.env.PRESAGE_API_KEY) throw new Error('Add PRESAGE_API_KEY to .env and restart the desktop app.');
       const { SmartSpectraSDK, breathingMetrics, cardioMetrics, decodeMetrics } = loadSdk();
       owner = sender;
       try {
-        sdk = new SmartSpectraSDK({ apiKey: process.env.PRESAGE_API_KEY, requestedMetrics: [...breathingMetrics, ...cardioMetrics] });
+        expressionResponses = options.expressionResponses === true;
+        expressions.reset(); lastExpression = -Infinity;
+        sdk = new SmartSpectraSDK({ apiKey: process.env.PRESAGE_API_KEY, requestedMetrics: [...breathingMetrics, ...cardioMetrics, ...(expressionResponses ? [EXPRESSIONS_METRIC] : [])] });
+        const current = sdk;
         lastMetric = 0; lastStamp = ''; lastFrame = -Infinity;
         latest = {}; lastValidation = null;
-        sdk.on('validationStatus', (code, _ts, hint) => { if (sdk && code !== lastValidation) { lastValidation = code; emit({ type: 'validation', code, hint }); } });
-        sdk.on('processingStatus', status => emit({ type: 'processing', status }));
+        sdk.on('validationStatus', (code, _ts, hint) => { if (sdk === current && code !== lastValidation) { lastValidation = code; emit({ type: 'validation', code, hint }); } });
+        sdk.on('processingStatus', status => { if (sdk === current) emit({ type: 'processing', status }); });
         sdk.on('error', (code, detail, retryable) => {
+          if (sdk !== current) return;
           const error = presageError(code, detail, retryable);
           logError(error); emit(error); void stop().catch(() => {});
         });
         sdk.on('metrics', buf => {
-          if (!sdk) return;
+          if (sdk !== current) return;
           try {
             const metrics = decodeMetrics(buf);
+            // Face packets can arrive before vitals. Keep their response cue local
+            // and separate from persisted metrics, stress scores and check-ins.
+            const expression = metrics.face?.expression?.at(-1);
+            if (expressionResponses && expression && now() - lastExpression >= 500) {
+              lastExpression = now();
+              emit({ type: 'expression', cue: expressions.observe(expression, now()) });
+            }
             // Metric groups can arrive in separate packets. Retain each group's
             // latest distinct measurement briefly instead of requiring one packet.
             for (const [name, value] of Object.entries({ pulse: metrics.cardio?.pulseRate?.at(-1), breath: metrics.breathing?.rate?.at(-1), hrv: metrics.cardio?.hrv?.at(-1) })) {
@@ -65,7 +80,7 @@ function createPresage({ loadSdk = () => require('@smartspectra/node-sdk'), now 
               if (Array.isArray(value)) return { count: value.length, latest: value.slice(-2).map(compact) };
               return Object.fromEntries(Object.entries(value).map(([key, value]) => [key, compact(value)]));
             };
-            const packet = compact(metrics);
+            const packet = compact({ ...metrics, ...(metrics.face ? { face: { ...metrics.face, expression: undefined } } : {}) });
             emit({ type: 'metrics', data: JSON.stringify(packet).length <= 20000 ? packet : { returnedFields: Object.keys(metrics), note: 'Packet too large; showing latest vital measurements.', pulse: compact(metrics.cardio?.pulseRate?.at(-1) ?? null), breathing: compact(metrics.breathing?.rate?.at(-1) ?? null) } });
             const recent = name => latest[name] && now() - latest[name].receivedAt <= 10000 ? latest[name].value : null;
             const pulse = recent('pulse'), breath = recent('breath');

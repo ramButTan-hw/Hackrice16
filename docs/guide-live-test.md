@@ -43,10 +43,10 @@ The original observations below are retained as failure history.
 | Escape during native action | Automated coverage only | Not verified live in this run. |
 | Spoken commands/microphone | Automated coverage only | Not tested with live speech. |
 
-## Unresolved issues
+## Issues observed before the targeting fixes
 
-1. Targeting is unreliable in the actual desktop. The model chose a Chrome tab-group label instead of the document tab, and word selection landed in the header. It is not yet established whether the latter was inaccurate model coordinates, desktop geometry, or changing focus/layout.
-2. The guide's generic “Looking at your screen” status hides native-helper initialization and model latency.
+1. Targeting failed in the initial run: the model chose a Chrome tab-group label instead of the document tab, and word selection landed in the header. The retest above passed the specific Animals-to-red workflow after OCR and Accessibility grounding were added. That result does not establish reliability for arbitrary desktop tasks.
+2. The initial guide used a generic “Looking at your screen” status that hid native-helper initialization and model latency. The current code reports preparation, screen reading, step selection, target location, input, and result-checking phases. These new progress messages have automated coverage; they have not yet been verified in a live provider run.
 3. Graceful termination of isolated test processes left blank windows after their local servers stopped. Force-stopping only those disposable test instances restored a clean launch.
 
-Do not describe unit tests or helper compilation as proof of successful native formatting. A release pass requires repeating the disposable-document task through Jarvis without manual correction, visibly verifying the selected word and final red text, then checking Stop/Escape and live voice separately.
+Do not describe unit tests or helper compilation as proof of successful native formatting. The targeted live retest above supplies separate evidence for that workflow. Before a release or demonstration, repeat it without manual correction, verify the selected word and final red text, and check marker visibility, Stop/Escape, and live voice separately. Global Escape and live speech remain unverified by this report.

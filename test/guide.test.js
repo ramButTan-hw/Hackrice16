@@ -30,10 +30,10 @@ test('guide model gets a screenshot and rejects malformed output without acting'
  await assert.rejects(guideStep({goal:'Search',screenshot:'bad!'},{apiKey:'test',fetcher}),/fresh screenshot/);
  await assert.rejects(guideStep({goal:'Search',screenshot:'YWJj'},{apiKey:'test',fetcher:async()=>Response.json({candidates:[{content:{parts:[{text:'not json'}]}}]})}),/identify/);
 });
-function fixture(t,{wait=async()=>{}}={}){
- const windows=[],handlers=new Map(),shortcuts=new Map(),calls=[],launches=[],requests=[],focuses=[];
+function fixture(t,{wait=async()=>{},modelWait=async()=>{}}={}){
+ const windows=[],handlers=new Map(),shortcuts=new Map(),calls=[],launches=[],requests=[],focuses=[],states=[];
  class Window extends EventEmitter{
-  constructor(options){super();this.visible=false;this.options=options;this.webContents=new EventEmitter();this.webContents.mainFrame={};this.webContents.session={setPermissionCheckHandler(){},setPermissionRequestHandler(){}};this.webContents.send=()=>{};this.webContents.setWindowOpenHandler=()=>{};windows.push(this);}
+  constructor(options){super();this.visible=false;this.options=options;this.webContents=new EventEmitter();this.webContents.mainFrame={};this.webContents.session={setPermissionCheckHandler(){},setPermissionRequestHandler(){}};this.webContents.send=(_channel,state)=>states.push(state);this.webContents.setWindowOpenHandler=()=>{};windows.push(this);}
   static getAllWindows(){return windows;}
   isVisible(){return this.visible;}isDestroyed(){return this.destroyed;}
   hide(){this.visible=false;}show(){this.visible=true;}showInactive(){this.visible=true;}destroy(){this.destroyed=true;this.emit('closed');}
@@ -45,11 +45,29 @@ function fixture(t,{wait=async()=>{}}={}){
  const screen=Object.assign(new EventEmitter(),{getCursorScreenPoint:()=>({x:10,y:10}),getDisplayNearestPoint:()=>display,getAllDisplays:()=>[display]});
  const display={id:1,bounds:{x:0,y:0,width:1000,height:800},workArea:{x:0,y:0,width:1000,height:800}};
  const app=new EventEmitter();
- const guide=createGuide({app,BrowserWindow:Window,ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},screen,desktopCapturer:{getSources:async()=>[{display_id:'1',thumbnail:image()}]},globalShortcut:{register:(key,fn)=>{shortcuts.set(key,fn);return true;},unregister:key=>shortcuts.delete(key)},systemPreferences:{},shell:{},permissions:{ensure:async()=>{}},authorize:()=>{},launchTarget:async step=>{launches.push(step);return {name:step.name||new URL(step.url).hostname};},apiUrl:()=>'',fetcher:async(url,options)=>{requests.push(JSON.parse(url.endsWith('/api/transcribe')?'{}':options.body));return url.endsWith('/api/transcribe')?Response.json(transcriptionStatus===200?{text:'I did it'}:{error:'No speech recognized.'},{status:transcriptionStatus}):Response.json(Array.isArray(modelStep)?modelStep.shift():modelStep);},inputDriver:{run:async action=>{if(action.action==='locate_control')return {matches:controlMatches};if(action.action==='locate_word')return {matches:wordMatches};if(action.action==='status')return {pid:123,trusted:true};if(action.action==='restore'){focuses.push(action);if(restoreFailure)throw new Error('The active app changed. Get a fresh step.');return {ok:true};}calls.push(action);if(inputFailure)throw new Error('macOS is blocking mouse and keyboard input.');return {ok:true};},stop:()=>calls.push('stop')},wait});
+ const guide=createGuide({app,BrowserWindow:Window,ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},screen,desktopCapturer:{getSources:async()=>[{display_id:'1',thumbnail:image()}]},globalShortcut:{register:(key,fn)=>{shortcuts.set(key,fn);return true;},unregister:key=>shortcuts.delete(key)},systemPreferences:{},shell:{},permissions:{ensure:async()=>{}},authorize:()=>{},launchTarget:async step=>{launches.push(step);return {name:step.name||new URL(step.url).hostname};},apiUrl:()=>'',fetcher:async(url,options)=>{requests.push(JSON.parse(url.endsWith('/api/transcribe')?'{}':options.body));if(!url.endsWith('/api/transcribe'))await modelWait();return url.endsWith('/api/transcribe')?Response.json(transcriptionStatus===200?{text:'I did it'}:{error:'No speech recognized.'},{status:transcriptionStatus}):Response.json(Array.isArray(modelStep)?modelStep.shift():modelStep);},inputDriver:{run:async action=>{if(action.action==='locate_control')return {matches:controlMatches};if(action.action==='locate_word')return {matches:wordMatches};if(action.action==='status')return {pid:123,trusted:true};if(action.action==='restore'){focuses.push(action);if(restoreFailure)throw new Error('The active app changed. Get a fresh step.');return {ok:true};}calls.push(action);if(inputFailure)throw new Error('macOS is blocking mouse and keyboard input.');return {ok:true};},stop:()=>calls.push('stop')},wait});
  t.after(()=>guide.stop());
  const invoke=(name,...args)=>{const sender=windows[0]?.webContents;return handlers.get(name.startsWith('music:')?name:'guide:'+name)({sender,senderFrame:sender?.mainFrame},...args);};
- return {invoke,calls,launches,requests,focuses,controls:matches=>controlMatches=matches,words:matches=>wordMatches=matches,failRestore:()=>restoreFailure=true,failInput:()=>inputFailure=true,shortcuts,transcription:status=>transcriptionStatus=status,changeScreen:()=>color=200,model:step=>modelStep=step};
+ return {invoke,calls,launches,requests,focuses,states,controls:matches=>controlMatches=matches,words:matches=>wordMatches=matches,failRestore:()=>restoreFailure=true,failInput:()=>inputFailure=true,shortcuts,transcription:status=>transcriptionStatus=status,changeScreen:()=>color=200,model:step=>modelStep=step};
 }
+test('guide distinguishes waiting for a suggestion from input and result verification',async t=>{
+ let release;const waiting=new Promise(resolve=>release=resolve);
+ const f=fixture(t,{modelWait:()=>waiting});await f.invoke('open','Find search');
+ const pending=f.invoke('next','Find search');await new Promise(resolve=>setImmediate(resolve));
+ assert.equal((await f.invoke('ready')).phase,'choosing');assert.equal(f.calls.length,0);
+ assert.ok(f.states.some(s=>s.phase==='preparing'));assert.ok(f.states.some(s=>s.phase==='reading'));
+ release();await pending;assert.equal((await f.invoke('ready')).phase,'ready');assert.equal(f.calls.length,0);
+ await f.invoke('execute');assert.equal(f.calls.length,1);
+ assert.ok(f.states.some(s=>s.busy&&s.phase==='checking_target'));assert.ok(f.states.some(s=>s.busy&&s.phase==='acting'));
+ await f.invoke('next','Find search');assert.ok(f.states.some(s=>s.busy&&s.phase==='checking'));
+});
+test('Stop while choosing a step prevents late progress and desktop input',async t=>{
+ let release;const waiting=new Promise(resolve=>release=resolve);
+ const f=fixture(t,{modelWait:()=>waiting});await f.invoke('open','Find search');
+ const pending=f.invoke('next','Find search');await new Promise(resolve=>setImmediate(resolve));
+ f.invoke('stop');const count=f.states.length;release();await pending;
+ assert.equal(f.states.length,count);assert.deepEqual(f.calls,['stop']);
+});
 test('guide executes only one approved step and rejects repeated or stale screen actions',async t=>{
  const f=fixture(t);await f.invoke('open','Find search');await f.invoke('next','Find search');assert.equal(f.calls.length,0);
  await f.invoke('execute');assert.equal(f.calls.length,1);assert.equal(f.calls[0].action,'click');
@@ -198,6 +216,7 @@ test('takeover reports native input failure and never automatically retries it',
  const f=fixture(t);await f.invoke('open','Find search');await f.invoke('next','Find search');f.failInput();
  await f.invoke('takeover');await new Promise(resolve=>setImmediate(resolve));
  const state=await f.invoke('ready');assert.match(state.takeoverMessage,/macOS is blocking/);
+ assert.equal(state.phase,'error');assert.equal(state.busy,false);
  assert.equal(f.calls.length,1);assert.equal(f.requests.length,1);assert.equal(state.takeover,false);
 });
 test('takeover stops refreshing if a replacement preview also expires',async t=>{
@@ -274,4 +293,14 @@ test('missing OCR word blocks double-click instead of falling back to a guess',a
 test('duplicate accessibility nodes at the same position represent one target',()=>{
  const {groundWord}=require('../shared/guide-target.cjs');
  assert.deepEqual(groundWord(click,[{x:.4,y:.3},{x:.4001,y:.3001}]),{...click,x:.4,y:.3});
+});
+
+test('typing grounds the labeled field before sending native text input',async t=>{
+ const f=fixture(t);await f.invoke('open','Fill Task title');
+ f.model({action:'type',instruction:'Type Jarvis test into Task title.',target:'Task title',text:'Jarvis test',x:.1,y:.2});
+ f.controls([{x:300,y:400}]);
+ await f.invoke('next','Fill Task title');
+ const state=await f.invoke('ready');assert.equal(state.step.x,.3);assert.equal(state.step.y,.5);
+ await f.invoke('execute');assert.equal(f.calls.length,1);
+ assert.equal(f.calls[0].action,'type');assert.equal(f.calls[0].text,'Jarvis test');assert.equal(f.calls[0].x,300);assert.equal(f.calls[0].y,400);
 });

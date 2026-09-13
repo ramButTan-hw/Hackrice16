@@ -1,4 +1,5 @@
 import {metric} from '../shared/contracts.js';
+import {deriveState} from './state-engine.js';
 // Repeatable, smoothly varying synthetic pulse; not physiological measurements.
 export function demoHeartRate(seconds){
   const smooth=value=>{const x=Math.max(0,Math.min(1,value));return x*x*(3-2*x);};
@@ -18,6 +19,7 @@ export async function feedDemo(sessions,session,now){
       const sample=metric({source:'demo',timestamp,heartRate:demoHeartRate(seconds),breathingRate:15,quality:1},s.source,s.startedAt,now,s.samples.at(-1)?.timestamp);
       sample.excludedFromAnalysis=Boolean(s.assistance?.breakStartedAt||timestamp<(s.assistance?.helpUntil??0));
       s.samples.push(sample);
+      sample.state=deriveState(s,sample.timestamp).state;
     }
     s.activity={idleSeconds:0,timestamp:now,source:'demo'};
   });

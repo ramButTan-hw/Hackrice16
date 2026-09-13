@@ -7,7 +7,9 @@ export function summarize(session, now = Date.now()) {
   stateSeconds.unknown += Math.max(0, Math.min(session.samples[0]?.timestamp ?? end, end) - session.startedAt) / 1000;
   session.samples.forEach((s, index) => {
     const gap = Math.max(0, Math.min(session.samples[index + 1]?.timestamp ?? end, end) - s.timestamp);
-    stateSeconds[s.state] += Math.min(gap, RULES.staleMs) / 1000;
+    // Older demo records did not save a state. Preserve that missing evidence.
+    const state = Object.hasOwn(stateSeconds, s.state) ? s.state : 'unknown';
+    stateSeconds[state] += Math.min(gap, RULES.staleMs) / 1000;
     stateSeconds.unknown += Math.max(0, gap - RULES.staleMs) / 1000;
   });
   const changes = session.interventions.map(i => {

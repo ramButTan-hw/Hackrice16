@@ -61,7 +61,7 @@ export function createApp({ repository = configuredRepository(), now = Date.now,
   app.get('/api/google/status',(_req,res)=>{const {accountId,...status}=google.status();res.json(status);});
   app.post('/api/google/connect',(_req,res)=>res.json(google.begin()));
   app.post('/api/google/disconnect',(_req,res)=>{google.disconnect();res.json({connected:false});});
-  app.get('/oauth/google/callback',async(req,res)=>{try{await google.callback(req.query);res.set('Content-Security-Policy',"default-src 'none'").type('html').send('<h1>Google connected</h1><p>You can close this tab and return to Jarvis.</p>');}catch(e){res.status(e.status||500).type('text').send(e.status?e.message:'Google sign-in failed. Return to Jarvis and try again.');}});
+  app.get('/oauth/google/callback',async(req,res)=>{try{await google.callback(req.query);res.set('Content-Security-Policy',"default-src 'none'").type('html').send('<h1>Google connected</h1><p>You can close this tab and return to Acumen.</p>');}catch(e){res.status(e.status||500).type('text').send(e.status?e.message:'Google sign-in failed. Return to Acumen and try again.');}});
   app.get('/api/google/items',async(_req,res)=>res.json(await workspace.context()));
   app.post('/api/google/actions/:id/image',express.json({limit:'15mb'}),async(req,res)=>res.json(workspace.attachImage(req.params.id,req.body?.conversationId,req.body?.index,req.body?.image,req.body?.prompt)));
   app.post('/api/google/actions/:id/illustrate',async(req,res)=>res.json(await workspace.illustrate(req.params.id,req.body?.conversationId)));

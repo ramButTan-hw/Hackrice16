@@ -26,11 +26,11 @@ The macOS check runs automatically before `npm run dev` and `npm start`. It vali
 
 ## Permissions in the app
 
-Open **Session → Device permissions**, available on macOS even before a session starts. It shows the current camera, microphone and Screen Recording statuses. **Allow** requests access. After denial, **Open Settings** opens the appropriate Privacy & Security pane. Status refreshes when you return to the app.
+Open **Session → Device permissions**, available on macOS even before a session starts. It shows the current camera, microphone, Screen Recording, and Accessibility statuses. **Allow** requests access. After denial, **Open Settings** opens the appropriate Privacy & Security pane. Status refreshes when you return to the app.
 
 During development, grant access to **Electron**. A future packaged build will use its own app identity and require separate permission. Camera and microphone requests also happen when you first use those features. Screen permission is requested only through screen help or the permission control; the permission probe is discarded without saving or uploading an image. Screen access can initially appear denied before macOS has prompted, so the app attempts the native capture request before directing you to settings.
 
-macOS controls the final approval. It cannot be enabled programmatically. After changing permission in System Settings, fully quit and reopen the app, then retry. A managed/restricted permission may require the device administrator. If a settings deep link does not select the pane on your macOS version, open **System Settings → Privacy & Security** manually and select Camera, Microphone, or Screen Recording / Screen & System Audio Recording. Accessibility and Input Monitoring permissions are not needed for the current app.
+macOS controls the final approval. It cannot be enabled programmatically. After changing permission in System Settings, fully quit and reopen the app, then retry. A managed/restricted permission may require the device administrator. If a settings deep link does not select the pane on your macOS version, open **System Settings → Privacy & Security** manually and select Camera, Microphone, or Screen Recording / Screen & System Audio Recording. Accessibility is required for the guide’s “Do this step” and “Do it for me” mouse and keyboard actions. Grant it to the Electron bundle running this checkout. General chat and widgets do not need Accessibility; a separate Input Monitoring grant is not currently requested.
 
 ## Acceptance tests on a real Mac
 

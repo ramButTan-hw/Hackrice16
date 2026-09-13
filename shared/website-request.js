@@ -6,7 +6,7 @@ export function websiteUrl(value) {
   return url.href;
 }
 export function websiteRequest(text) {
-  const value = String(text).trim().replace(/^(?:hey\s+)?jarvis[,! ]*/i, '').replace(/[.!?]+$/, '').trim();
+  const value = String(text).trim().replace(/^(?:hey\s+)?(?:jarvis|acumen)[,! ]*/i, '').replace(/[.!?]+$/, '').trim();
   const match = value.match(/^(?:(?:please|can you|could you|would you|will you)\s+)?(?:open|launch|visit|go to|take me to|bring up)\s+(.+?)(?:\s+(?:please|for me|in (?:my |the )?browser))?$/i);
   if (!match) return null;
   let address = match[1].replace(/^(?:the )?(.+?) (?:website|site)$/i,'$1').replace(/\s+dot\s+/gi, '.');

@@ -3,11 +3,29 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const {createPermissions,installMediaPermissions}=createRequire(import.meta.url)('../electron/permissions.cjs');
 function setup(initial={}){
-  const states={camera:'not-determined',microphone:'not-determined',screen:'not-determined',...initial};
-  const calls=[];
-  const permissions=createPermissions({platform:'darwin',systemPreferences:{getMediaAccessStatus:kind=>states[kind],async askForMediaAccess(kind){calls.push(kind);await Promise.resolve();states[kind]='granted';return true;}},shell:{async openExternal(url){calls.push(url);}},desktopCapturer:{async getSources(){calls.push('capture');states.screen='granted';return [];}}});
-  return {states,calls,permissions};
+  const states={camera:'not-determined',microphone:'not-determined',screen:'not-determined',accessibility:'denied',...initial};
+  const calls=[],accessibilityQueries=[];
+  const permissions=createPermissions({platform:'darwin',systemPreferences:{getMediaAccessStatus:kind=>states[kind],isTrustedAccessibilityClient(prompt){accessibilityQueries.push(prompt);return states.accessibility==='granted';},async askForMediaAccess(kind){calls.push(kind);await Promise.resolve();states[kind]='granted';return true;}},shell:{async openExternal(url){calls.push(url);}},desktopCapturer:{async getSources(){calls.push('capture');states.screen='granted';return [];}}});
+  return {states,calls,permissions,accessibilityQueries};
 }
+test('Accessibility readiness reads never prompt and the settings action opens its own pane',async()=>{
+  const {states,calls,permissions,accessibilityQueries}=setup();
+  assert.equal(permissions.status().accessibility,'denied');
+  assert.deepEqual(accessibilityQueries,[false]);assert.deepEqual(calls,[]);
+  assert.equal(await permissions.request('accessibility'),'denied');
+  await permissions.openSettings('accessibility');
+  assert.deepEqual(calls,['x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility']);
+  states.accessibility='granted';assert.equal(permissions.status().accessibility,'granted');
+  assert.ok(accessibilityQueries.every(value=>value===false));
+});
+test('unavailable and non-macOS Accessibility checks remain unknown without prompting',async()=>{
+  for(const platform of ['darwin','win32','linux']){
+    const preferences={getMediaAccessStatus:()=> 'unknown',...(platform!=='darwin'?{isTrustedAccessibilityClient(){throw new Error('macOS only');}}:{})};
+    const permissions=createPermissions({platform,systemPreferences:preferences});
+    assert.equal(permissions.status().accessibility,'unknown');
+    assert.equal(await permissions.request('accessibility'),'unknown');
+  }
+});
 test('macOS requests only the needed device and coalesces simultaneous prompts',async()=>{
   const {permissions,calls}=setup();
   await Promise.all([permissions.ensure('camera'),permissions.ensure('camera')]);

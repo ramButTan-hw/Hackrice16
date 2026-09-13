@@ -21,7 +21,10 @@
     "setup:attention": "node scripts/setup-attention.js",
     "predev": "node scripts/check-macos.js",
     "prestart": "node scripts/check-macos.js",
-    "check:macos": "node scripts/check-macos.js"
+    "check:macos": "node scripts/check-macos.js",
+    "demo:check": "node scripts/demo-check.js",
+    "demo:rehearse": "npm run build && node scripts/rehearse.js",
+    "demo:verify": "node scripts/verify-demo.js"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

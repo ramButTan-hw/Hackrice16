@@ -88,7 +88,7 @@ export function plannerService(repository, now = Date.now, calendar = null) {
       const updated = { ...plan, google };
       await repository.savePlan(updated); return updated;
     }); },
-    async create(body) {
+    create(body) { return exclusive(async () => {
       const title = text(body?.title, 'title');
       const { start, end, timeZone = 'UTC' } = body ?? {};
       zoneClock(timeZone);
@@ -97,7 +97,7 @@ export function plannerService(repository, now = Date.now, calendar = null) {
       if (existing.some(p => start < p.end + 900000 && end + 900000 > p.start)) fail('This time is no longer available. Leave 15 minutes between plans and find times again.', 409);
       const plan = { id: randomUUID(), title, start, end, timeZone, createdAt: now() };
       await repository.insertPlan(plan); return plan;
-    },
+    }); },
     remove(id) { return exclusive(async () => { await repository.deletePlan(id); return { ok: true }; }); },
   };
 }

@@ -1,14 +1,21 @@
-const panes = { camera: 'Privacy_Camera', microphone: 'Privacy_Microphone', screen: 'Privacy_ScreenCapture' };
+const panes = { camera: 'Privacy_Camera', microphone: 'Privacy_Microphone', screen: 'Privacy_ScreenCapture', accessibility: 'Privacy_Accessibility' };
 
 exports.createPermissions = function ({ platform = process.platform, systemPreferences, shell, desktopCapturer }) {
   const pending = new Map();
   function validate(kind) { if (!Object.hasOwn(panes, kind)) throw new Error('Invalid permission.'); }
   function status(kind) {
     validate(kind);
+    if (kind === 'accessibility') {
+      if (platform !== 'darwin' || typeof systemPreferences?.isTrustedAccessibilityClient !== 'function') return 'unknown';
+      // Inspect readiness without opening a macOS prompt during routine refreshes.
+      try { return systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'denied'; }
+      catch { return 'unknown'; }
+    }
     return ['darwin', 'win32'].includes(platform) ? systemPreferences.getMediaAccessStatus(kind) : 'unknown';
   }
   async function request(kind) {
     validate(kind);
+    if (kind === 'accessibility') return status(kind);
     if (platform !== 'darwin') return status(kind);
     if (pending.has(kind)) return pending.get(kind);
     const operation = (async () => {
@@ -17,7 +24,7 @@ exports.createPermissions = function ({ platform = process.platform, systemPrefe
           // Screen consent is triggered by capture, not askForMediaAccess.
           // Discard this tiny permission-probe image without sending or saving it.
           try { await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }); }
-          catch { throw new Error('Screen access is unavailable. Open Session → Device permissions → Screen Recording → Open Settings, allow Electron/Jarvis, then fully quit and reopen the app.'); }
+          catch { throw new Error('Screen access is unavailable. Open Session → Device permissions → Screen Recording → Open Settings, allow Electron/Acumen, then fully quit and reopen the app.'); }
         } else await systemPreferences.askForMediaAccess(kind);
       }
       return status(kind);
@@ -28,7 +35,7 @@ exports.createPermissions = function ({ platform = process.platform, systemPrefe
   async function ensure(kind) {
     const value = await request(kind);
     if (platform === 'darwin' && value !== 'granted') {
-      throw new Error(`Allow ${kind === 'screen' ? 'Screen Recording' : kind} in Session → Device permissions → Open Settings, then fully quit and reopen Jarvis. macOS currently reports ${value}.`);
+      throw new Error(`Allow ${kind === 'screen' ? 'Screen Recording' : kind} in Session → Device permissions → Open Settings, then fully quit and reopen Acumen. macOS currently reports ${value}.`);
     }
   }
   return {

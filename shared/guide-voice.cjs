@@ -1,6 +1,6 @@
 exports.guideVoiceCommand=function(text){
  if(typeof text!=='string'||text.length>2000)return null;
- const value=text.toLowerCase().trim().replace(/[’‘]/g,"'").replace(/^(?:hey[ ,]+)?jarvis[,! ]*/,'').replace(/[.!?,]+$/,'').trim();
+ const value=text.toLowerCase().trim().replace(/[’‘]/g,"'").replace(/^(?:hey[ ,]+)?(?:jarvis|acumen)[,! ]*/,'').replace(/[.!?,]+$/,'').trim();
  if(/^(?:let'?s start|start the guide|start guidance|start)$/.test(value))return {action:'start'};
  if(/^(?:i did it|i've done it|i have done it|done|next|next step|continue)$/.test(value))return {action:'next'};
  if(/^(?:please )?do it for me(?: please)?$/.test(value))return {action:'takeover'};

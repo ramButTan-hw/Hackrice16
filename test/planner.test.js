@@ -67,6 +67,19 @@ test('planner writes and deletion use the repository and validate dates', async 
   await assert.rejects(planner.create({ title: 'Past', start: stamp - 1, end: stamp + 1 }), { status: 400 });
   await planner.remove(plan.id); assert.deepEqual(await planner.list(), []);
 });
+test('simultaneous planner saves cannot reserve the same time twice', async t => {
+  const repo = sqliteRepository(':memory:'); t.after(() => repo.close());
+  const planner = plannerService(repo, () => stamp);
+  const request = { title: 'Study', start: stamp + 3600000, end: stamp + 7200000, timeZone: 'UTC' };
+  const results = await Promise.allSettled([planner.create(request), planner.create(request)]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.find(result => result.status === 'rejected').reason.status, 409);
+  assert.equal((await planner.list()).length, 1);
+  // A rejected duplicate must not prevent later valid saves.
+  const later = await planner.create({ ...request, start: request.end + 900000, end: request.end + 4500000 });
+  assert.equal((await planner.list()).length, 2);
+  assert.equal(later.start, request.end + 900000);
+});
 test('Supabase plans use the private planner table', async () => {
   const calls = [];
   const repo = supabaseRepository('https://example.supabase.co', 'sb_secret_test', async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => [] }; });

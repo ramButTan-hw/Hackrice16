@@ -1,4 +1,4 @@
-# Set up Jarvis on another device
+# Set up Acumen on another device
 
 Use this guide for a fresh teammate installation or moving your own setup. Commands are for **Windows PowerShell**, the platform tested for this app. macOS/Linux notes are at the end. No MATLAB, Picovoice account, or Gemini Live setup is needed for the current companion.
 
@@ -76,7 +76,7 @@ Wait for `Local hey Jarvis detection is ready. Restart the desktop app.` This cr
 Optional verification:
 
 ```powershell
-& '.\data\wake-env\Scripts\python.exe' -c "from openwakeword.model import Model; Model(wakeword_models=['hey_jarvis'], inference_framework='onnx'); print('Jarvis model ready')"
+& '.\data\wake-env\Scripts\python.exe' -c "from openwakeword.model import Model; Model(wakeword_models=['hey_jarvis'], inference_framework='onnx'); print('Acumen model ready')"
 ```
 
 See [the wake-word guide](WAKE_WORD_SETUP.md) for detailed microphone troubleshooting. Without Python/wake setup, typing and the optional Listen button remain available.
@@ -110,11 +110,11 @@ In the Google Cloud project associated with your Desktop OAuth client:
 3. Create an OAuth client of type **Desktop app**, or use the team's existing Desktop client with authorization from its owner.
 4. Put its client ID and secret in `.env` on this device.
 
-Run the app as shown below, open Jarvis's three-dot menu, select **Connect Google**, and finish browser consent on this device. A Gemini key alone cannot grant access to Google documents.
+Run the app as shown below, open Acumen's three-dot menu, select **Connect Google**, and finish browser consent on this device. A Gemini key alone cannot grant access to Google documents.
 
 For this setup, keep the development backend on port **3001**. The OAuth callback is `http://127.0.0.1:3001/oauth/google/callback`. `npm start` uses an embedded server and automatically binds Google OAuth to its actual loopback port. Changing `PORT` alone does not update the Vite proxy and development startup checks.
 
-Google tokens are held in backend memory: reconnect after a backend restart. The app accesses Jarvis-created items and its separate **Jarvis work sessions** calendar, not your entire existing Drive or personal calendar availability. See [Google Workspace setup](GOOGLE_WORKSPACE_SETUP.md) for the preview/confirmation flow and deck-edit limitations.
+Google tokens are held in backend memory: reconnect after a backend restart. The app accesses Acumen-created items and its separate **Acumen work sessions** calendar, not your entire existing Drive or personal calendar availability. See [Google Workspace setup](GOOGLE_WORKSPACE_SETUP.md) for the preview/confirmation flow and deck-edit limitations.
 
 ## 6. Start and verify
 
@@ -147,7 +147,7 @@ Screen capture uses the display under your cursor. Keep the relevant material vi
 
 ## 7. Restarting and updating
 
-Close the main desktop window first: Jarvis saves the active session as ended before camera cleanup and quitting. Camera shutdown is bounded so a stalled SDK cannot leave the session timer active. Minimizing, collapsing, or closing just the companion panel keeps the session active. If saving fails, the app stays open and asks you to retry. Force-killing the process or a power loss cannot run this graceful shutdown. Then stop any remaining development terminal with **Ctrl+C** before starting another copy. After a code update, run `npm ci` if dependencies changed, then `npm run dev`. Restart the whole development process after `.env` or Electron/preload changes. Avoid running a second backend alongside `npm run dev`.
+Close the main desktop window first: Acumen saves the active session as ended before camera cleanup and quitting. Camera shutdown is bounded so a stalled SDK cannot leave the session timer active. Minimizing, collapsing, or closing just the companion panel keeps the session active. If saving fails, the app stays open and asks you to retry. Force-killing the process or a power loss cannot run this graceful shutdown. Then stop any remaining development terminal with **Ctrl+C** before starting another copy. After a code update, run `npm ci` if dependencies changed, then `npm run dev`. Restart the whole development process after `.env` or Electron/preload changes. Avoid running a second backend alongside `npm run dev`.
 
 Backend-only development restart command: `npm run dev:server` (use only when your frontend/Electron are being managed separately). Google reconnect is required after the API restarts, including automatic restarts from its file watcher.
 
@@ -163,7 +163,7 @@ For **moving your own installation**, stop both apps before privately copying se
 | `data/backboard-assistants.json` | Backboard real/demo assistant identities; use the same authorized Backboard account/key. |
 | `data/google-workspace.json` | Known Google item IDs, deck outlines, retained slide images, and operation history. Sign in to the same Google account. |
 
-The registry is essential for editing earlier Jarvis-created decks on the new machine; Google sign-in alone does not discover them. Never copy the Python virtual environment. Downloaded standalone images are separate files and must be moved separately if wanted. Pending previews, open chat, and OAuth tokens do not transfer. Transfer `.env` privately only if appropriate, and correct any machine-specific paths.
+The registry is essential for editing earlier Acumen-created decks on the new machine; Google sign-in alone does not discover them. Never copy the Python virtual environment. Downloaded standalone images are separate files and must be moved separately if wanted. Pending previews, open chat, and OAuth tokens do not transfer. Transfer `.env` privately only if appropriate, and correct any machine-specific paths.
 
 ## Troubleshooting
 
